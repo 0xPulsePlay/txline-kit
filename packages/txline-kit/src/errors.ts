@@ -25,3 +25,5 @@ export class ActivationError extends AuthenticationError {}
 export class HttpError extends TxLineError {}
 export class DataShapeError extends TxLineError {}
 export class StreamError extends TxLineError {}
+export class ProofError extends TxLineError {}
+export class VerificationError extends TxLineError {}

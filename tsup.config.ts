@@ -8,6 +8,8 @@ export default defineConfig({
     data: "src/data.ts",
     errors: "src/errors.ts",
     replay: "src/replay.ts",
+    proofs: "src/proofs.ts",
+    onchain: "src/onchain.ts",
     cli: "src/cli.ts",
   },
   format: ["esm", "cjs"],

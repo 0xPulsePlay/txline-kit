@@ -40,6 +40,33 @@ const credentials = await txline.auth.subscribeFree({
 
 `wallet` may be a Solana `Keypair` or a compatible wallet adapter. Credentials are held in memory by default; pass a `CredentialStore` to control persistence.
 
+## Fetch and simulate a proof
+
+```ts
+const bundle = await txline.proofs.fetch({
+  fixtureId: 18_241_006,
+  seq: 962,
+  statKeys: [1, 2],
+});
+
+const strategy = {
+  geometricTargets: [],
+  distancePredicate: null,
+  discretePredicates: bundle.stats.map(({ stat }, index) => ({
+    single: {
+      index,
+      predicate: { threshold: stat.value, comparison: { equalTo: {} } },
+    },
+  })),
+};
+
+const verified = await txline.onchain.verifyView(bundle, strategy);
+```
+
+`verifyView` is a read-only Solana simulation. It requires an existing fee-payer account for simulation, but it does not submit a transaction or spend funds. `buildValidateIx` returns the validation instruction, daily-root account, and 1.4M-CU pre-instruction for composition.
+
+`verifyMerklePath` locally recomputes a directional SHA-256 path from an already-canonical 32-byte leaf hash. The SDK intentionally does not yet claim a full `verifyLocal(bundle)` API: TxLINE's exact score-stat leaf serialization must first be reproduced against several known roots.
+
 ## Data guarantees
 
 - Network hosts, program IDs, and token mints are pinned by network.
@@ -56,6 +83,8 @@ const credentials = await txline.auth.subscribeFree({
 - `@0xpulseplay/txline-kit/data`
 - `@0xpulseplay/txline-kit/errors`
 - `@0xpulseplay/txline-kit/replay`
+- `@0xpulseplay/txline-kit/proofs`
+- `@0xpulseplay/txline-kit/onchain`
 
 The `txline-replay` binary imports, validates, and inspects `.trec` recordings. Full provider recordings must remain private unless redistribution is explicitly authorized.
 
