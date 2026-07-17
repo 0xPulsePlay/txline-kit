@@ -220,6 +220,13 @@ function sseText(record: TrecEnvelope): string {
   return `id: ${record.recordId}\ndata: ${JSON.stringify({ raw: body })}\n\n`;
 }
 
+function lastRecordAtOrBefore(records: readonly TrecEnvelope[], at: number): number {
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    if (records[index]!.at <= at) return index;
+  }
+  return -1;
+}
+
 async function streamRecords(request: IncomingMessage, response: ServerResponse, session: ReplaySession, channel: "sse" | "odds"): Promise<void> {
   const controller = new AbortController();
   request.on("close", () => controller.abort(new Error("client disconnected")));
@@ -228,7 +235,7 @@ async function streamRecords(request: IncomingMessage, response: ServerResponse,
   const channelRecords = session.recording.records.filter((record) => channel === "sse" ? record.channel === "sse" || record.channel === "historical" : record.channel === "odds");
   const resumeIndex = lastId > 0
     ? channelRecords.findIndex((record) => record.recordId > lastId)
-    : channelRecords.findLastIndex((record) => record.at <= startAt);
+    : lastRecordAtOrBefore(channelRecords, startAt);
   const records = resumeIndex < 0 ? (lastId > 0 ? [] : channelRecords) : channelRecords.slice(resumeIndex);
   response.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", connection: "keep-alive", "x-accel-buffering": "no" });
   response.write(": txline-replay\n\n");
