@@ -7,7 +7,9 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "json-summary"],
       thresholds: { lines: 90, statements: 90, branches: 85, functions: 90 },
-      include: ["packages/txline-kit/src/recording.ts"],
+      include: [
+        "packages/txline-kit/src/{auth,client,core,data,errors,http,recording,sse}.ts",
+      ],
     },
   },
 });
