@@ -1,0 +1,22 @@
+{
+  "name": "txline-kit-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.14.0",
+  "scripts": {
+    "build": "pnpm --filter @0xpulseplay/txline-kit build",
+    "check": "pnpm typecheck && pnpm test",
+    "typecheck": "pnpm --filter @0xpulseplay/txline-kit typecheck",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "proof:report": "node scripts/proof-report.mjs"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
+    "@playwright/test": "^1.54.1",
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^3.2.4",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

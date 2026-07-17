@@ -13,4 +13,5 @@ test-results/
 .DS_Store
 proof/**/traces/
 proof/**/videos/
+proof/**/index.html
 .world/ports.lock
