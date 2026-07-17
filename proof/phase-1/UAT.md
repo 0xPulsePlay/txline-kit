@@ -17,7 +17,7 @@
 | Severity | Finding | Fix | Result |
 |---|---|---|---|
 | High | A 401 retry could recurse indefinitely or retry with the stale JWT. | Capped renewal at one attempt, persisted the fresh JWT, and asserted the exact three-request header sequence. | Resolved. |
-| High | Accepting only one finalisation field would permit premature settlement logic. | Added a strict three-field predicate and negative tests for every partial combination. | Resolved. |
+| High | Accepting only an action would permit premature settlement, while requiring the documented period blocked actual mainnet finals that omit it. | Require `game_finalised` plus status 100, reject non-100 periods, and label explicit-period versus provider-omitted evidence. | Resolved after Phase 3 empirical UAT. |
 | High | Browser/read-only consumers could eagerly load Anchor and Token-2022 transaction code. | Moved subscription submission behind a dynamic import and enabled build splitting. | Resolved. |
 | Medium | Concurrent guest starts could create multiple JWTs and race credential persistence. | Added a single-flight promise with concurrency coverage. | Resolved. |
 | Medium | Provider payload casing varies between captured and documented surfaces. | Added boundary normalization with preservation of unknown fields. | Resolved. |

@@ -27,3 +27,5 @@ export class DataShapeError extends TxLineError {}
 export class StreamError extends TxLineError {}
 export class ProofError extends TxLineError {}
 export class VerificationError extends TxLineError {}
+export class StrategyError extends TxLineError {}
+export class CoverageError extends StrategyError {}

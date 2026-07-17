@@ -131,11 +131,24 @@ export function isStrictFinalisation(record: CanonicalScoreRecord): boolean {
   return record.action?.toLowerCase() === "game_finalised" && record.statusId === 100 && record.period === 100;
 }
 
+export type FinalisationEvidence = "explicit-period-100" | "provider-period-omitted";
+
+export function finalisationEvidence(record: CanonicalScoreRecord): FinalisationEvidence | undefined {
+  if (record.action?.toLowerCase() !== "game_finalised" || record.statusId !== 100) return undefined;
+  if (record.period === 100) return "explicit-period-100";
+  if (record.period === undefined) return "provider-period-omitted";
+  return undefined;
+}
+
+export function isSettlementFinalisation(record: CanonicalScoreRecord): boolean {
+  return finalisationEvidence(record) !== undefined;
+}
+
 export type SemanticEventType = "goal" | "card" | "phase_change" | "finalised" | "other";
 export interface SemanticScoreEvent { type: SemanticEventType; record: CanonicalScoreRecord }
 
 export function classifyScoreEvent(record: CanonicalScoreRecord): SemanticScoreEvent {
-  if (isStrictFinalisation(record)) return { type: "finalised", record };
+  if (isSettlementFinalisation(record)) return { type: "finalised", record };
   const action = record.action?.toLowerCase() ?? "";
   if (action === "goal" || action === "penalty_goal" || action === "own_goal") return { type: "goal", record };
   if (action.includes("card") || action === "booking") return { type: "card", record };
@@ -227,11 +240,11 @@ export class DataClient {
       const historical = await this.historical(fixtureId);
       for (let index = historical.length - 1; index >= 0; index -= 1) {
         const candidate = historical[index];
-        if (candidate && isStrictFinalisation(candidate)) return candidate;
+        if (candidate && isSettlementFinalisation(candidate)) return candidate;
       }
     } catch { /* historical availability is bounded; continue with live stream */ }
     for await (const record of this.stream({ ...options, fixtures: [fixtureId] })) {
-      if (isStrictFinalisation(record)) return record;
+      if (isSettlementFinalisation(record)) return record;
     }
     throw options.signal?.reason ?? new Error(`Finalisation stream ended for fixture ${fixtureId}`);
   }

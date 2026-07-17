@@ -36,7 +36,7 @@ Fixture `18241006` was imported into `.trec` v1 without committing the restricte
 
 ## Trust-boundary correction
 
-The oracle CPI proves selected stat values but not the feed's `game_finalised/statusId=100/period=100` lifecycle record. The demo settlement will therefore require both a score proof and an explicit signed keeper finalisation attestation. Documentation and UI must show the distinction.
+The oracle CPI proves selected stat values but not the feed lifecycle record. Later human UAT confirmed mainnet emits `game_finalised/statusId=100` while omitting the documented period field. The demo settlement will therefore require both a score proof and an explicit signed keeper finalisation attestation that records this evidence quality. Documentation and UI must show the distinction.
 
 ## Automated validation
 

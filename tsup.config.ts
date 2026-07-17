@@ -10,6 +10,7 @@ export default defineConfig({
     replay: "src/replay.ts",
     proofs: "src/proofs.ts",
     onchain: "src/onchain.ts",
+    strategy: "src/strategy.ts",
     cli: "src/cli.ts",
   },
   format: ["esm", "cjs"],

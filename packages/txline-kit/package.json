@@ -50,6 +50,11 @@
       "types": "./dist/onchain.d.ts",
       "import": "./dist/onchain.js",
       "require": "./dist/onchain.cjs"
+    },
+    "./strategy": {
+      "types": "./dist/strategy.d.ts",
+      "import": "./dist/strategy.js",
+      "require": "./dist/strategy.cjs"
     }
   },
   "files": [
