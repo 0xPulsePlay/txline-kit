@@ -1,0 +1,16 @@
+node_modules/
+dist/
+target/
+coverage/
+playwright-report/
+test-results/
+.env
+.env.*
+!.env.example
+*.trec
+*.trec.zst
+*.idx.json
+.DS_Store
+proof/**/traces/
+proof/**/videos/
+.world/ports.lock
