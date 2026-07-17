@@ -86,6 +86,11 @@ function mappedError(error: unknown): VerificationError {
   if (error instanceof VerificationError) return error;
   const detail = error as { error?: { errorCode?: { code?: string } }; message?: string };
   const code = detail.error?.errorCode?.code;
+  if (error instanceof RangeError && detail.message?.includes("offset")) return new VerificationError("The encoded TxLINE validation payload exceeds the client transaction buffer", {
+    code: "VALIDATION_PAYLOAD_TOO_LARGE",
+    fix: "Request fewer stat keys or split the predicates across multiple validation calls; proof-path length also contributes to transaction size.",
+    cause: error,
+  });
   if (code === "InvalidMainTreeProof") return new VerificationError("TxLINE rejected the main-tree proof", {
     code,
     fix: "Derive the PDA from bundle.summary.updateStats.minTimestamp, use that same value as payload ts, and confirm every hash is 32 bytes without reversal.",

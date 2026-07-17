@@ -85,6 +85,27 @@ market.assertSettlementRecord(finalisationRecord);
 
 The low-level `strategy()` builder owns stat order and positional indexes, and refuses compilation unless every requested stat is covered exactly once. `markets.overUnder(..., "totalGoals", 2.5)` converts the half-line into correct integer predicates. Same-call parlays must use one fixture and disjoint stat keys; unsupported atomic claims fail before a proof is fetched.
 
+## Replay a recording
+
+```sh
+txline-replay validate match.trec
+txline-replay serve match.trec --port 38770 --speed 10 --pause-on goal
+txline-replay serve match.trec --port 38770 --deterministic
+```
+
+Point the unchanged SDK at it:
+
+```ts
+const txline = createTxLineClient({
+  network: "mainnet",
+  baseUrl: "http://127.0.0.1:38770",
+});
+```
+
+The replay host implements guest/activation stubs, fixture coverage, score and odds SSE, snapshots, updates, history, exact proof lookup, health, status, and control endpoints. `POST /__txline/control` supports play, pause, seek, speed, and pause-on-event changes. SSE IDs support `Last-Event-ID` resume.
+
+Three committed synthetic recordings cover home win, draw, and away win. Restricted real recordings remain outside Git; their historical roots still validate through mainnet when replayed locally.
+
 ## Data guarantees
 
 - Network hosts, program IDs, and token mints are pinned by network.
