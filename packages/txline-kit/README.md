@@ -67,13 +67,31 @@ const verified = await txline.onchain.verifyView(bundle, strategy);
 
 `verifyMerklePath` locally recomputes a directional SHA-256 path from an already-canonical 32-byte leaf hash. The SDK intentionally does not yet claim a full `verifyLocal(bundle)` API: TxLINE's exact score-stat leaf serialization must first be reproduced against several known roots.
 
+## Compile a safe market
+
+```ts
+import { markets } from "@0xpulseplay/txline-kit/strategy";
+
+const market = markets.finalResult(18_241_006).awayWin();
+const bundle = await txline.proofs.fetch({
+  fixtureId: market.fixtureId,
+  seq: 963,
+  statKeys: market.statKeys,
+});
+
+const won = await txline.onchain.verifyView(bundle, market.strategy);
+market.assertSettlementRecord(finalisationRecord);
+```
+
+The low-level `strategy()` builder owns stat order and positional indexes, and refuses compilation unless every requested stat is covered exactly once. `markets.overUnder(..., "totalGoals", 2.5)` converts the half-line into correct integer predicates. Same-call parlays must use one fixture and disjoint stat keys; unsupported atomic claims fail before a proof is fetched.
+
 ## Data guarantees
 
 - Network hosts, program IDs, and token mints are pinned by network.
 - Provider casing is normalized at the boundary while unknown fields are retained.
 - SSE reconnects carry `Last-Event-ID` and respect server retry hints.
 - HTTP 401 responses trigger one JWT renewal and one retry.
-- Finality is strict: `action=game_finalised`, `statusId=100`, and `period=100` must all be present.
+- Settlement finality requires `action=game_finalised` and `statusId=100`; `period` must equal `100` when present. `finalisationEvidence` distinguishes explicit period 100 from the provider-observed mainnet omission.
 - A TxLINE stat proof establishes the selected stat value; lifecycle finality is a separate trust claim.
 
 ## Subpath exports
@@ -85,6 +103,7 @@ const verified = await txline.onchain.verifyView(bundle, strategy);
 - `@0xpulseplay/txline-kit/replay`
 - `@0xpulseplay/txline-kit/proofs`
 - `@0xpulseplay/txline-kit/onchain`
+- `@0xpulseplay/txline-kit/strategy`
 
 The `txline-replay` binary imports, validates, and inspects `.trec` recordings. Full provider recordings must remain private unless redistribution is explicitly authorized.
 

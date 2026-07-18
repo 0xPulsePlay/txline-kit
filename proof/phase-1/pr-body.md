@@ -4,7 +4,7 @@
 
 - Adds explicit network configuration, wallet/store abstractions, typed errors, and a client factory.
 - Implements guest auth, exact activation signing, existing-subscription reactivation, free subscription submission, credential headers, timeouts, and one-shot JWT renewal.
-- Adds normalized score/odds snapshots, updates, history, schedules, semantic events, strict finalisation, `awaitFinal`, and async SSE streams.
+- Adds normalized score/odds snapshots, updates, history, schedules, semantic events, explicit finalisation evidence, `awaitFinal`, and async SSE streams.
 - Produces split ESM and CommonJS bundles, declarations, source maps, subpath exports, and a package quick start.
 - Adds comprehensive protocol, error-path, endpoint, stream, coverage, clean-room consumer, responsive, and accessibility QA.
 

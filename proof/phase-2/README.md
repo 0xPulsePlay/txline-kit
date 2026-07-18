@@ -14,7 +14,7 @@ PASS — V2 score proofs are normalized into one strict positional bundle, daily
 - Every malformed hash names its exact path and fails before Anchor serialization.
 - Fixture IDs, timestamps, and update counts are range checked; proof fixture mismatches fail closed.
 - Fixture and timestamp fields become BNs; payload `ts` is exactly `summary.updateStats.minTimestamp`.
-- `forFinal` composes strict lifecycle finalisation with proof fetch and defaults to confirmed score keys `1,2`.
+- `forFinal` composes lifecycle evidence with proof fetch and defaults to confirmed score keys `1,2`; explicit period 100 and the provider-observed omitted-period case remain distinguishable.
 
 ## Verification contract
 

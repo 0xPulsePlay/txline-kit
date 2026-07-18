@@ -4,7 +4,9 @@ import {
   bucketStart,
   classifyScoreEvent,
   epochDay,
+  finalisationEvidence,
   isStrictFinalisation,
+  isSettlementFinalisation,
   normalizeOddsRecord,
   normalizeScoreRecord,
   semanticEvents,
@@ -53,6 +55,12 @@ describe("normalization, buckets, and semantics", () => {
       { action: "game_finalised", statusId: 99, period: 100 },
       { action: "goal", statusId: 100, period: 100 },
     ]) expect(isStrictFinalisation(partial)).toBe(false);
+    const observedMainnet = normalizeScoreRecord({ Action: "game_finalised", StatusId: 100 });
+    expect(isStrictFinalisation(observedMainnet)).toBe(false);
+    expect(isSettlementFinalisation(observedMainnet)).toBe(true);
+    expect(finalisationEvidence(observedMainnet)).toBe("provider-period-omitted");
+    expect(finalisationEvidence(final)).toBe("explicit-period-100");
+    expect(finalisationEvidence({ action: "game_finalised", statusId: 100, period: 99 })).toBeUndefined();
     const records = [
       normalizeScoreRecord({ Action: "goal" }),
       normalizeScoreRecord({ Action: "yellow_card" }),

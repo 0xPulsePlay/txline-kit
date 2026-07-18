@@ -4,7 +4,7 @@ Generated July 17, 2026 Eastern Time.
 
 ## Outcome
 
-PASS — the TypeScript client foundation provides pinned network selection, wallet activation, credential lifecycle management, normalized score and odds access, resilient SSE consumption, strict finalisation semantics, and consumable ESM/CommonJS package outputs.
+PASS — the TypeScript client foundation provides pinned network selection, wallet activation, credential lifecycle management, normalized score and odds access, resilient SSE consumption, explicit finalisation evidence semantics, and consumable ESM/CommonJS package outputs.
 
 ## Client contract
 
@@ -33,7 +33,7 @@ PASS — the TypeScript client foundation provides pinned network selection, wal
 - Reconnects send `Last-Event-ID`; retry delay is bounded; abort signals remain caller-controlled.
 - Semantic helpers classify goals, cards, phase changes, finalisation, and other events.
 - `awaitFinal` first checks history and then streams live updates.
-- Finalisation is accepted only when action, status, and period all agree: `game_finalised`, `100`, `100`.
+- Finalisation requires `game_finalised` and status `100`; an explicit period must be `100`. Phase 3 human UAT later confirmed that real mainnet final records omit the documented period field, so evidence now labels that omission rather than synthesizing a value.
 
 ## Automated validation
 

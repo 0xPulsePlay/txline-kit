@@ -9,3 +9,5 @@ Phase 1 adds the production client foundation: pinned network configuration, wal
 See [`packages/txline-kit/README.md`](packages/txline-kit/README.md) for the package quick start.
 
 Phase 2 adds strict V2 proof normalization, ordered stat contracts, daily-root PDA derivation, local directional SHA-256 verification primitives, read-only mainnet validation, and composable validation instructions.
+
+Phase 3 adds a total-coverage strategy compiler, the confirmed 64-key soccer registry, final-result and total-goals markets, safe same-fixture parlays, and evidence-aware finalisation gates.
