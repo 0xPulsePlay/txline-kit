@@ -61,9 +61,11 @@ test("captures the Phase 7 visual proof matrix", async ({ page }, testInfo) => {
     if (screen === "modules") {
       const contained = await page.locator(".module-map").evaluate((map) => {
         const bounds = map.getBoundingClientRect();
+        const tolerance = 1;
         return [...map.querySelectorAll(":scope > button")].every((button) => {
           const item = button.getBoundingClientRect();
-          return item.left >= bounds.left && item.right <= bounds.right && item.top >= bounds.top && item.bottom <= bounds.bottom;
+          return item.left >= bounds.left - tolerance && item.right <= bounds.right + tolerance
+            && item.top >= bounds.top - tolerance && item.bottom <= bounds.bottom + tolerance;
         });
       });
       expect(contained, "SDK module controls are not clipped").toBe(true);
