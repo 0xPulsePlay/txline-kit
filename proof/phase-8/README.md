@@ -26,6 +26,12 @@ These are not claimed as complete. They require a future authenticated release a
 
 ## Source-release finalization
 
-- Public visibility audit for `txline-kit` and `txline-capture`.
-- `v0.1.0` tag and GitHub release.
-- Final CI and stop-condition audit.
+- `0xPulsePlay/txline-capture` is public at main `8403533`; authenticated metadata and anonymous API/web requests confirm public visibility.
+- `0xPulsePlay/txline-kit` is public at main `7ac7a9c`; authenticated metadata and anonymous API/web requests confirm public visibility.
+- Annotated tag `v0.1.0` and the [GitHub source release](https://github.com/0xPulsePlay/txline-kit/releases/tag/v0.1.0) point to the merged Phase 8 main head.
+- Final PR #10 CI: TypeScript Node 20/22/24, release archive smoke, browser proof, and Rust CPI all PASS.
+- Final production artifact: `7ac7a9c-20260718T092633Z`.
+- Rollback rehearsal: production switched to `21396bb-20260718T075242Z`, returned HTTP 200, then restored the final artifact and returned HTTP 200 locally and publicly.
+- Production is public HTTP 200; development remains HTTP 302 to Cloudflare Access; both app services, Caddy, and cloudflared are active.
+
+All non-registry Phase 8 requirements pass. The two operator-deferred registries remain the only intentionally unfinished items and are not represented as published.
