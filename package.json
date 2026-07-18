@@ -13,6 +13,7 @@
     "check:rust": "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo check -p txline-kit-cpi --no-default-features --features devnet",
     "program:build": "cargo build-sbf --manifest-path programs/txline-demo-escrow/Cargo.toml --sbf-out-dir target/deploy",
     "program:idl": "anchor idl build -o target/txline_demo_escrow.json --program-name txline_demo_escrow --no-docs",
+    "release:smoke": "node scripts/release-smoke.mjs",
     "proof:report": "node scripts/proof-report.mjs",
     "fixture:synthetic": "node scripts/create-synthetic-fixture.mjs"
   },
