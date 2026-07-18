@@ -13,7 +13,10 @@ const gateStatus = /\bBLOCKED\b/.test(acceptance) ? "PARTIAL / BLOCKED" : "GATE 
 const screenshotDir = join(root, "screenshots");
 let images = [];
 try {
-  images = (await readdir(screenshotDir)).filter((name) => /\.(png|webp|jpe?g)$/i.test(name)).sort();
+  images = (await readdir(screenshotDir))
+    .filter((name) => /\.(png|webp|jpe?g)$/i.test(name))
+    .filter((name) => phase !== "8" || name.includes("-"))
+    .sort();
 } catch {}
 const mime = (name) => extname(name).toLowerCase() === ".webp" ? "image/webp" : extname(name).toLowerCase() === ".png" ? "image/png" : "image/jpeg";
 const gallery = (await Promise.all(images.map(async (name) => {

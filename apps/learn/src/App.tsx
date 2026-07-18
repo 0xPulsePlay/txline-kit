@@ -213,6 +213,11 @@ function ModuleMap() {
 
 export function App() {
   const [screen, navigate] = useHashScreen();
+  useEffect(() => {
+    if (matchMedia("(max-width: 720px)").matches) {
+      document.querySelector<HTMLElement>(".side-nav .active")?.scrollIntoView({ block: "nearest", inline: "center" });
+    }
+  }, [screen]);
   return <div className="app-shell">
     <a className="skip-link" href="#content">Skip to content</a>
     <header className="topbar"><button className="brand" onClick={() => navigate("overview")} aria-label="TxLINE Kit home"><SparkMark /><strong>TxLINE</strong><span>kit</span></button><div className="network"><i /> MAINNET PROOF · PUBLIC SYNTHETIC DATA</div><a href="https://github.com/0xPulsePlay/txline-kit" target="_blank" rel="noreferrer">GitHub ↗</a></header>
