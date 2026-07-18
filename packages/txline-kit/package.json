@@ -4,18 +4,58 @@
   "description": "Safe TypeScript, replay, and Solana CPI tooling for TxLINE",
   "license": "MIT OR Apache-2.0",
   "type": "module",
-  "engines": { "node": ">=20" },
-  "bin": { "txline-replay": "dist/cli.js" },
-  "exports": {
-    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
-    "./replay": { "types": "./dist/recording.d.ts", "import": "./dist/recording.js" }
+  "engines": {
+    "node": ">=20"
   },
-  "files": ["dist", "README.md"],
+  "bin": {
+    "txline-replay": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./core": {
+      "types": "./dist/core.d.ts",
+      "import": "./dist/core.js",
+      "require": "./dist/core.cjs"
+    },
+    "./auth": {
+      "types": "./dist/auth.d.ts",
+      "import": "./dist/auth.js",
+      "require": "./dist/auth.cjs"
+    },
+    "./data": {
+      "types": "./dist/data.d.ts",
+      "import": "./dist/data.js",
+      "require": "./dist/data.cjs"
+    },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "import": "./dist/errors.js",
+      "require": "./dist/errors.cjs"
+    },
+    "./replay": {
+      "types": "./dist/replay.d.ts",
+      "import": "./dist/replay.js",
+      "require": "./dist/replay.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsup --config ../../tsup.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@coral-xyz/anchor": "0.32.1",
+    "@solana/spl-token": "0.4.14",
+    "@solana/web3.js": "1.98.4",
+    "bn.js": "5.2.2",
+    "tweetnacl": "1.0.3",
     "zod": "^4.0.5"
   },
   "devDependencies": {
