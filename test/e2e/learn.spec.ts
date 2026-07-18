@@ -40,6 +40,7 @@ test("learning app supports replay, strategy, proof, settlement, and module jour
 
 test("learning app has no serious accessibility violations or horizontal overflow", async ({ page }) => {
   await page.goto("/#overview");
+  await page.waitForTimeout(550);
   const audit = await new AxeBuilder({ page }).analyze();
   expect(audit.violations.filter(({ impact }) => impact === "critical" || impact === "serious")).toEqual([]);
   const width = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
