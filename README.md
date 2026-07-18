@@ -15,3 +15,5 @@ Phase 3 adds a total-coverage strategy compiler, the confirmed 64-key soccer reg
 Phase 4 adds the virtual-clock replay server, deterministic CI mode, interactive playback controls, resumable SSE, exact proof serving, and three cleared synthetic match recordings.
 
 Phase 5 adds the `txline-kit-cpi` Rust crate: a pinned `validate_stat_v2` ABI, feature-locked mainnet/devnet program IDs, timestamp-safe daily-root PDA derivation, byte-identical Anchor instruction serialization, and return-data origin/boolean checks. See [`crates/txline-kit-cpi/README.md`](crates/txline-kit-cpi/README.md) for the three-line consumer call.
+
+Phase 6 adds a bounded keeper workflow and a valueless three-outcome Anchor escrow. The demo uses immutable, non-overlapping settlement/refund windows and performs actual CPI settlement against TxLINE. See [`programs/txline-demo-escrow/README.md`](programs/txline-demo-escrow/README.md) for its security boundary.

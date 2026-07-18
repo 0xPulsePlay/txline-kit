@@ -1,0 +1,13 @@
+[features]
+resolution = true
+skip-lint = false
+
+[provider]
+cluster = "Localnet"
+wallet = "target/deploy/txline_demo_escrow-keypair.json"
+
+[programs.localnet]
+txline_demo_escrow = "AzfXDFdCyMY99KbcnhcqFud56SG2Xn9c88tGSzjtXQRS"
+
+[programs.mainnet]
+txline_demo_escrow = "AzfXDFdCyMY99KbcnhcqFud56SG2Xn9c88tGSzjtXQRS"

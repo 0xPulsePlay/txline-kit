@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/txline-kit-cpi"]
+members = ["crates/txline-kit-cpi", "programs/txline-demo-escrow"]
 resolver = "2"
 
 [workspace.package]
@@ -10,6 +10,7 @@ rust-version = "1.85"
 
 [workspace.dependencies]
 anchor-lang = "=0.32.1"
+anchor-spl = { version = "=0.32.1", default-features = false }
 
 [profile.release]
 overflow-checks = true
