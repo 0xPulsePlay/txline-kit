@@ -9,6 +9,8 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
+    "test:rust": "cargo test --workspace",
+    "check:rust": "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo check --workspace --no-default-features --features devnet",
     "proof:report": "node scripts/proof-report.mjs",
     "fixture:synthetic": "node scripts/create-synthetic-fixture.mjs"
   },

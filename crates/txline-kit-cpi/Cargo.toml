@@ -1,0 +1,23 @@
+[package]
+name = "txline-kit-cpi"
+version = "0.1.0"
+description = "Typed, return-safe Anchor CPI helpers for the TxLINE oracle"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+readme = "README.md"
+keywords = ["solana", "anchor", "oracle", "cpi", "txline"]
+categories = ["api-bindings", "cryptography::cryptocurrencies"]
+
+[lib]
+name = "txline_cpi"
+crate-type = ["lib"]
+
+[features]
+default = ["mainnet"]
+mainnet = []
+devnet = []
+
+[dependencies]
+anchor-lang.workspace = true

@@ -13,3 +13,5 @@ Phase 2 adds strict V2 proof normalization, ordered stat contracts, daily-root P
 Phase 3 adds a total-coverage strategy compiler, the confirmed 64-key soccer registry, final-result and total-goals markets, safe same-fixture parlays, and evidence-aware finalisation gates.
 
 Phase 4 adds the virtual-clock replay server, deterministic CI mode, interactive playback controls, resumable SSE, exact proof serving, and three cleared synthetic match recordings.
+
+Phase 5 adds the `txline-kit-cpi` Rust crate: a pinned `validate_stat_v2` ABI, feature-locked mainnet/devnet program IDs, timestamp-safe daily-root PDA derivation, byte-identical Anchor instruction serialization, and return-data origin/boolean checks. See [`crates/txline-kit-cpi/README.md`](crates/txline-kit-cpi/README.md) for the three-line consumer call.
