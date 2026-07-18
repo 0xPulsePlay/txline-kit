@@ -9,6 +9,6 @@ Prepares the initial npm and crates.io releases, dual-license archive contents, 
 - Cargo packages and recompiles the crate archive with the lockfile.
 - Archive scans exclude credentials, signer material, restricted recordings, host paths, and operational scripts.
 
-### Finalization still required
+### Registry publication deferred by operator
 
-Registry-origin installs, public repository visibility, v0.1.0 tag/release, final CI, and the completed Phase 8 proof report are hard merge gates.
+npm and crates.io publication plus registry-origin installs are intentionally deferred and are not claimed complete. Public repository visibility, the v0.1.0 source tag/release, final CI, and the completed Phase 8 source-release proof remain required.

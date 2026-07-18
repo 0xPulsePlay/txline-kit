@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 — 2026-07-18
+## 0.1.0 source release — 2026-07-18
 
 - Add typed TxLINE client, authentication, normalized data, and resilient SSE streams.
 - Add proof normalization, read-only RPC verification, safe predicate compilation, and bounded keeper workflows.

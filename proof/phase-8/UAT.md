@@ -17,7 +17,7 @@
 |---|---|---|---|
 | High | Published npm runtime graph inherited an unpatched SPL Token advisory. | Phase 7 replaced the four runtime helper calls with canonical byte-equivalent internal helpers and kept SPL Token dev-only. | Resolved before release. |
 | Medium | The first manual clean-room assertion looked for `verifyMerklePath` under `/proofs`; its documented export is root and `/onchain`. | Corrected the consumer assertion and encoded it in `release-smoke.mjs`. | Resolved. |
-| Medium | npm and crates.io credentials are intentionally absent from this host. | Complete every non-credentialed gate first; use an operator-authenticated client or short-lived trusted publisher without persisting secrets. | Pending external publication only. |
+| Medium | npm and crates.io credentials are intentionally absent from this host. | The operator explicitly deferred both registry publications; preserve the verified artifacts and authenticated release checklist for later. | Accepted deferral; not claimed as published. |
 | Low | Web3 emits UUID and Node `punycode` deprecation warnings in a clean consumer. | Keep the documented upstream advisory; no unsafe forced override. | Accepted for 0.1.0. |
 
-Final release UAT will add registry-origin installs, public repository checks, tag/release receipts, and final CI before this phase passes.
+Source-release UAT will add public repository checks, tag/release receipts, and final CI. Registry-origin checks remain a clearly labeled future addendum.

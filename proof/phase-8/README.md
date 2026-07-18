@@ -2,9 +2,9 @@
 
 Generated July 18, 2026 Eastern Time.
 
-## Candidate outcome
+## Source-release outcome
 
-RELEASE CANDIDATE — all local package, archive, clean-room consumer, unit, type, build, Rust, and production-audit gates pass. Registry publication, registry-origin consumer installs, repository visibility changes, tag/release creation, and final GitHub CI are recorded here only after they occur.
+PASS FOR PUBLIC SOURCE RELEASE — all local package, archive, clean-room consumer, unit, type, build, Rust, production-audit, browser, and GitHub CI gates pass. The operator explicitly deferred npm and crates.io publication and registry-origin install checks on July 18, 2026; the verified archives remain ready for a later registry release.
 
 ## Validated candidate
 
@@ -17,10 +17,15 @@ RELEASE CANDIDATE — all local package, archive, clean-room consumer, unit, typ
 - Archive boundary scan: no credentials, signer material, restricted fixtures, operational scripts, or host paths.
 - Production dependency audit: no Critical or High advisory; one documented Moderate Web3/UUID advisory.
 
-## Pending final receipts
+## Explicitly deferred registry receipts
 
 - npm registry publication and registry-origin install.
 - crates.io publication and registry-origin consumer compile.
+
+These are not claimed as complete. They require a future authenticated release action and a Phase 8 addendum.
+
+## Source-release finalization
+
 - Public visibility audit for `txline-kit` and `txline-capture`.
 - `v0.1.0` tag and GitHub release.
 - Final CI and stop-condition audit.
