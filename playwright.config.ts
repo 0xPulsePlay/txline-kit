@@ -1,10 +1,21 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const learnPort = Number(process.env.TXLINE_TEST_WEB_PORT);
+if (!Number.isInteger(learnPort) || learnPort < 1) {
+  throw new Error("TXLINE_TEST_WEB_PORT is required; resolve txline-kit-test-web with port-for");
+}
+const learnUrl = `http://127.0.0.1:${learnPort}`;
+
 export default defineConfig({
   testDir: "./test/e2e",
   outputDir: "./test-results",
   reporter: "list",
-  use: { timezoneId: "America/New_York", colorScheme: "dark", trace: "retain-on-failure" },
+  webServer: {
+    command: `PORT=${learnPort} pnpm --filter @0xpulseplay/txline-learn dev`,
+    url: learnUrl,
+    reuseExistingServer: false,
+  },
+  use: { baseURL: learnUrl, timezoneId: "America/New_York", colorScheme: "dark", trace: "retain-on-failure" },
   projects: [
     { name: "desktop", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 1000 } } },
     { name: "laptop", use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 800 } } },

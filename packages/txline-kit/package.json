@@ -72,7 +72,6 @@
   },
   "dependencies": {
     "@coral-xyz/anchor": "0.32.1",
-    "@solana/spl-token": "0.4.15",
     "@solana/web3.js": "1.98.4",
     "@types/bn.js": "^5.1.6",
     "bn.js": "5.2.5",
@@ -80,6 +79,7 @@
     "zod": "^4.0.5"
   },
   "devDependencies": {
+    "@solana/spl-token": "0.4.15",
     "@types/node": "^24.0.0",
     "typescript": "^5.9.3"
   }
