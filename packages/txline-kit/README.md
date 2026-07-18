@@ -10,6 +10,8 @@ pnpm add @0xpulseplay/txline-kit
 
 Node.js 20 or newer is required. The package ships ESM and CommonJS entry points.
 
+The public interactive guide is available at [txline-kit.claude.do](https://txline-kit.claude.do). This initial release is unaudited hackathon integration software and must not be used for real-money custody.
+
 ## Read from a replay server
 
 ```ts

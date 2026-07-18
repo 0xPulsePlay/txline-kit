@@ -1,8 +1,20 @@
 {
   "name": "@0xpulseplay/txline-kit",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Safe TypeScript, replay, and Solana CPI tooling for TxLINE",
   "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/0xPulsePlay/txline-kit.git",
+    "directory": "packages/txline-kit"
+  },
+  "homepage": "https://txline-kit.claude.do",
+  "bugs": "https://github.com/0xPulsePlay/txline-kit/issues",
+  "keywords": ["solana", "sports-data", "oracle", "replay", "merkle-proof"],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -64,10 +76,13 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
   ],
   "scripts": {
     "build": "tsup --config ../../tsup.config.ts",
+    "prepack": "pnpm build",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

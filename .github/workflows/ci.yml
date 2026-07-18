@@ -25,6 +25,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm build
+      - if: matrix.node == 24
+        run: pnpm release:smoke
 
   browser-proof:
     runs-on: ubuntu-latest
