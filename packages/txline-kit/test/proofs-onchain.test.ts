@@ -1,0 +1,143 @@
+import { createHash } from "node:crypto";
+import { Keypair, PublicKey } from "@solana/web3.js";
+import { describe, expect, test, vi } from "vitest";
+import { createTxLineClient } from "../src/client.js";
+import { resolveClientConfig } from "../src/core.js";
+import { DataClient } from "../src/data.js";
+import { ProofError, VerificationError } from "../src/errors.js";
+import { HttpPipeline } from "../src/http.js";
+import { dailyScoresPda, merkleRootFromLeaf, OnchainClient, verifyMerklePath } from "../src/onchain.js";
+import { decodeBytes32, normalizeProofBundle, ProofClient } from "../src/proofs.js";
+
+const bytes = (seed: number) => Array.from({ length: 32 }, (_, index) => (seed + index) % 256);
+const node = (seed: number, isRightSibling = true) => ({ hash: bytes(seed), isRightSibling });
+
+function rawProof(statKeys: readonly number[] = [1, 2]) {
+  return {
+    ts: 1_783_828_320_805,
+    summary: {
+      fixtureId: "18241006",
+      updateStats: { updateCount: 2, minTimestamp: "1783828320792", maxTimestamp: 1_783_828_320_805 },
+      eventStatsSubTreeRoot: `0x${Buffer.from(bytes(1)).toString("hex")}`,
+    },
+    subTreeProof: [node(2, false)],
+    mainTreeProof: [{ hash: Buffer.from(bytes(3)).toString("base64"), isRightSibling: true }],
+    eventStatRoot: bytes(4),
+    statsToProve: statKeys.map((key, index) => ({ key, value: index, period: 100 })),
+    statProofs: statKeys.map((_, index) => [node(5 + index)]),
+  };
+}
+
+describe("proof normalization", () => {
+  test("decodes every supported hash format to immutable 32-byte arrays", () => {
+    const value = bytes(9);
+    expect(decodeBytes32(value)).toEqual(value);
+    expect(decodeBytes32(Uint8Array.from(value))).toEqual(value);
+    expect(decodeBytes32(`0x${Buffer.from(value).toString("hex")}`)).toEqual(value);
+    expect(decodeBytes32(Buffer.from(value).toString("base64"))).toEqual(value);
+    expect(Object.isFrozen(decodeBytes32(value))).toBe(true);
+    expect(() => decodeBytes32([1, 2], "mainTreeProof[3].hash")).toThrow(/mainTreeProof\[3\].hash.*32 bytes/);
+    expect(() => decodeBytes32(Buffer.from([1, 2]).toString("base64"))).toThrow(/32 bytes/);
+    expect(() => decodeBytes32([256])).toThrow(/unsupported/);
+    expect(() => decodeBytes32("0xabc")).toThrow(/odd-length/);
+    expect(() => decodeBytes32({ nope: true })).toThrow(/unsupported/);
+  });
+
+  test("constructs BNs, preserves requested order, and uses minTimestamp for payload ts", () => {
+    const bundle = normalizeProofBundle(rawProof(), { fixtureId: 18_241_006, seq: 108, statKeys: [1, 2] });
+    expect(bundle.fixtureId).toBe(18_241_006);
+    expect(bundle.seq).toBe(108);
+    expect(bundle.requestedStatKeys).toEqual([1, 2]);
+    expect(bundle.summary.fixtureId.toString()).toBe("18241006");
+    expect(bundle.apiTimestamp?.toString()).toBe("1783828320805");
+    expect(bundle.ts.toString()).toBe("1783828320792");
+    expect(bundle.summary.updateStats.minTimestamp.toString()).toBe(bundle.ts.toString());
+    expect(bundle.stats.map(({ stat }) => stat.key)).toEqual([1, 2]);
+    expect(bundle.fixtureProof[0]).toMatchObject({ isRightSibling: false, hash: bytes(2) });
+    expect(Object.isFrozen(bundle)).toBe(true);
+    const withoutApiTs = normalizeProofBundle({ ...rawProof(), ts: undefined }, { fixtureId: 18_241_006, seq: 108, statKeys: [1, 2] });
+    expect(withoutApiTs.apiTimestamp).toBeUndefined();
+  });
+
+  test("rejects positional, fixture, integer, and shape mismatches with fix hints", () => {
+    const request = { fixtureId: 18_241_006, seq: 108, statKeys: [1, 2] } as const;
+    expect(() => normalizeProofBundle({ ...rawProof(), statsToProve: [{ key: 2, value: 0, period: 0 }, { key: 1, value: 0, period: 0 }] }, request)).toThrow(/stat order/);
+    expect(() => normalizeProofBundle({ ...rawProof(), summary: { ...rawProof().summary, fixtureId: 99 } }, request)).toThrow(/does not match requested/);
+    expect(() => normalizeProofBundle({ ...rawProof(), statProofs: [] }, request)).toThrow(/parallel arrays/);
+    expect(() => normalizeProofBundle({ ...rawProof(), subTreeProof: [{ hash: bytes(1), isRightSibling: "yes" }] }, request)).toThrow(/valid proof node/);
+    expect(() => normalizeProofBundle([], request)).toThrow(ProofError);
+    try { normalizeProofBundle({ ...rawProof(), eventStatRoot: [1] }, request); } catch (error) {
+      expect(error).toMatchObject({ code: "PROOF_HASH_LENGTH_INVALID", fix: expect.stringContaining("truncated") });
+    }
+  });
+});
+
+describe("proof client", () => {
+  test("builds the V2 query, authenticates through the client, and normalizes", async () => {
+    const seen: string[] = [];
+    const fetch = vi.fn(async (url: string | URL | Request) => { seen.push(String(url)); return new Response(JSON.stringify(rawProof()), { status: 200 }); });
+    const tx = createTxLineClient({ network: "mainnet", baseUrl: "http://replay.test", fetch });
+    await expect(tx.proofs.fetch({ fixtureId: 18_241_006, seq: 108, statKeys: [1, 2] })).resolves.toMatchObject({ fixtureId: 18_241_006, seq: 108 });
+    expect(seen).toEqual(["http://replay.test/api/scores/stat-validation?fixtureId=18241006&seq=108&statKeys=1%2C2"]);
+  });
+
+  test("guards seq, keys, provider JSON, and final-record composition", async () => {
+    const http = new HttpPipeline(resolveClientConfig({ network: "mainnet", baseUrl: "http://replay.test", fetch: vi.fn(async () => new Response("bad")) }));
+    const data = { awaitFinal: vi.fn(async () => ({ seq: 400 })) } as unknown as DataClient;
+    const proofs = new ProofClient(http, data);
+    await expect(proofs.fetch({ fixtureId: 0, seq: 1, statKeys: [1] })).rejects.toMatchObject({ code: "PROOF_FIXTURE_INVALID" });
+    await expect(proofs.fetch({ fixtureId: 1, seq: 0, statKeys: [1] })).rejects.toMatchObject({ code: "PROOF_SEQ_INVALID" });
+    await expect(proofs.fetch({ fixtureId: 1, seq: 1, statKeys: [1, 1] })).rejects.toMatchObject({ code: "PROOF_STAT_KEYS_INVALID" });
+    await expect(proofs.fetch({ fixtureId: 1, seq: 1, statKeys: [1] })).rejects.toMatchObject({ code: "PROOF_JSON_INVALID" });
+
+    const finalHttp = new HttpPipeline(resolveClientConfig({ network: "mainnet", baseUrl: "http://replay.test", fetch: vi.fn(async () => new Response(JSON.stringify(rawProof([1, 2])), { status: 200 })) }));
+    const finalProofs = new ProofClient(finalHttp, data);
+    await expect(finalProofs.forFinal(18_241_006)).resolves.toMatchObject({ seq: 400, requestedStatKeys: [1, 2] });
+    expect(data.awaitFinal).toHaveBeenCalledWith(18_241_006, {});
+  });
+});
+
+describe("on-chain primitives", () => {
+  test("derives the exact u16 little-endian daily scores PDA", () => {
+    const programId = new PublicKey("9ExbZjAapQww1vfcisDmrngPinHTEfpjYRWMunJgcKaA");
+    const timestamp = 1_783_828_320_792;
+    const epochDay = Math.floor(timestamp / 86_400_000);
+    const expected = PublicKey.findProgramAddressSync([
+      Buffer.from("daily_scores_roots"),
+      Buffer.from([epochDay & 0xff, epochDay >>> 8]),
+    ], programId)[0];
+    expect(dailyScoresPda(timestamp, programId).toBase58()).toBe(expected.toBase58());
+    expect(dailyScoresPda(new Date(timestamp), programId).toBase58()).toBe(expected.toBase58());
+    expect(() => dailyScoresPda(-1, programId)).toThrow(VerificationError);
+    expect(() => dailyScoresPda(70_000 * 86_400_000, programId)).toThrow(/u16/);
+  });
+
+  test("recomputes directional SHA-256 paths without claiming leaf serialization", async () => {
+    const hash = (left: number[], right: number[]) => [...createHash("sha256").update(Buffer.from([...left, ...right])).digest()];
+    const leaf = bytes(0);
+    const right = bytes(32);
+    const parent = hash(leaf, right);
+    const left = bytes(64);
+    const root = hash(left, parent);
+    const proof = [{ hash: right, isRightSibling: true }, { hash: left, isRightSibling: false }];
+    await expect(merkleRootFromLeaf(leaf, proof)).resolves.toEqual(root);
+    await expect(verifyMerklePath(leaf, proof, root)).resolves.toBe(true);
+    await expect(verifyMerklePath(bytes(1), proof, root)).resolves.toBe(false);
+    await expect(merkleRootFromLeaf([1], proof)).rejects.toMatchObject({ code: "MERKLE_LEAF_LENGTH_INVALID" });
+    await expect(verifyMerklePath(leaf, proof, [1])).rejects.toMatchObject({ code: "MERKLE_ROOT_LENGTH_INVALID" });
+  });
+
+  test("refuses an IDL from a different network before simulation", async () => {
+    const config = resolveClientConfig({ network: "mainnet", wallet: Keypair.generate(), fetch: vi.fn(async () => new Response(JSON.stringify({ address: PublicKey.default.toBase58() }), { status: 200 })) });
+    const onchain = new OnchainClient(config, new HttpPipeline(config));
+    const bundle = normalizeProofBundle(rawProof(), { fixtureId: 18_241_006, seq: 108, statKeys: [1, 2] });
+    await expect(onchain.verifyView(bundle, {})).rejects.toMatchObject({ code: "IDL_NETWORK_MISMATCH" });
+  });
+
+  test("explains why an existing wallet is required for a read-only view", async () => {
+    const config = resolveClientConfig({ network: "mainnet", fetch: vi.fn() });
+    const onchain = new OnchainClient(config, new HttpPipeline(config));
+    const bundle = normalizeProofBundle(rawProof(), { fixtureId: 18_241_006, seq: 108, statKeys: [1, 2] });
+    await expect(onchain.verifyView(bundle, {})).rejects.toMatchObject({ code: "SIMULATION_WALLET_MISSING", fix: expect.stringContaining("does not submit") });
+  });
+});

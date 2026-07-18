@@ -2,11 +2,15 @@ import { AuthClient } from "./auth.js";
 import { resolveClientConfig, type ResolvedClientConfig, type TxLineClientOptions } from "./core.js";
 import { DataClient } from "./data.js";
 import { HttpPipeline } from "./http.js";
+import { OnchainClient } from "./onchain.js";
+import { ProofClient } from "./proofs.js";
 
 export interface TxLineClient {
   readonly config: ResolvedClientConfig;
   readonly auth: AuthClient;
   readonly data: DataClient;
+  readonly proofs: ProofClient;
+  readonly onchain: OnchainClient;
 }
 
 export function createTxLineClient(options: TxLineClientOptions): TxLineClient {
@@ -14,5 +18,7 @@ export function createTxLineClient(options: TxLineClientOptions): TxLineClient {
   const http = new HttpPipeline(config);
   const auth = new AuthClient(config, http);
   const data = new DataClient(http);
-  return Object.freeze({ config, auth, data });
+  const proofs = new ProofClient(http, data);
+  const onchain = new OnchainClient(config, http);
+  return Object.freeze({ config, auth, data, proofs, onchain });
 }
