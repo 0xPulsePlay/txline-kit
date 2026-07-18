@@ -21,3 +21,15 @@
 | Low | Web3 emits UUID and Node `punycode` deprecation warnings in a clean consumer. | Keep the documented upstream advisory; no unsafe forced override. | Accepted for 0.1.0. |
 
 Source-release UAT will add public repository checks, tag/release receipts, and final CI. Registry-origin checks remain a clearly labeled future addendum.
+
+## Source-release receipts
+
+1. Both repositories returned public visibility through authenticated GitHub metadata.
+2. Both repositories returned HTTP 200 from anonymous GitHub API and web requests.
+3. The annotated `v0.1.0` tag and GitHub release resolve to the merged Phase 8 source.
+4. PR #10 passed all five GitHub jobs after the deferral documentation change.
+5. Final production release `7ac7a9c-20260718T092633Z` returned HTTP 200.
+6. Rollback to `21396bb-20260718T075242Z` returned HTTP 200; forward recovery returned HTTP 200 locally and publicly.
+7. Development remained protected by Cloudflare Access throughout.
+
+No unresolved Critical, High, or required-flow Medium defect remains in the public source release. npm and crates.io remain deliberately unpublished.
