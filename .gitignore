@@ -9,6 +9,7 @@ test-results/
 !.env.example
 *.trec
 *.trec.zst
+!fixtures/synthetic/*.trec
 *.idx.json
 .DS_Store
 proof/**/traces/
