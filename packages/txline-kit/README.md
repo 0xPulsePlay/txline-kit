@@ -85,6 +85,23 @@ market.assertSettlementRecord(finalisationRecord);
 
 The low-level `strategy()` builder owns stat order and positional indexes, and refuses compilation unless every requested stat is covered exactly once. `markets.overUnder(..., "totalGoals", 2.5)` converts the half-line into correct integer predicates. Same-call parlays must use one fixture and disjoint stat keys; unsupported atomic claims fail before a proof is fetched.
 
+## Run a bounded keeper
+
+```ts
+const result = await txline.keeper.watchAndSettle({
+  fixtureId: market.fixtureId,
+  market,
+  maxSubmitAttempts: 3,
+  submit: async ({ validation }, attempt) => {
+    // Compose validation.preInstructions and validation.instruction into
+    // your consumer-program settlement transaction, then sign and send it.
+    return submitConsumerSettlement(validation, attempt);
+  },
+});
+```
+
+The keeper waits for lifecycle finality, fetches the market's ordered proof, performs a read-only TxLINE verification, and prepares the validation instruction before calling consumer-owned submission code. A dry run stops after proof verification. Live submissions require a callback, use one to ten attempts, confirm signatures by default, support cancellation, and reject a false outcome before any transaction is submitted. Keep submission idempotent because RPC timeouts can hide a successful prior send.
+
 ## Replay a recording
 
 ```sh
@@ -125,6 +142,7 @@ Three committed synthetic recordings cover home win, draw, and away win. Restric
 - `@0xpulseplay/txline-kit/proofs`
 - `@0xpulseplay/txline-kit/onchain`
 - `@0xpulseplay/txline-kit/strategy`
+- `@0xpulseplay/txline-kit/keeper`
 
 The `txline-replay` binary imports, validates, and inspects `.trec` recordings. Full provider recordings must remain private unless redistribution is explicitly authorized.
 

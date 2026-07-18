@@ -11,6 +11,7 @@ export default defineConfig({
     proofs: "src/proofs.ts",
     onchain: "src/onchain.ts",
     strategy: "src/strategy.ts",
+    keeper: "src/keeper.ts",
     cli: "src/cli.ts",
   },
   format: ["esm", "cjs"],

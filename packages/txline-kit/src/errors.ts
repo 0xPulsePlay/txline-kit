@@ -29,3 +29,4 @@ export class ProofError extends TxLineError {}
 export class VerificationError extends TxLineError {}
 export class StrategyError extends TxLineError {}
 export class CoverageError extends StrategyError {}
+export class KeeperError extends TxLineError {}

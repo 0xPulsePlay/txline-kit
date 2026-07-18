@@ -55,6 +55,11 @@
       "types": "./dist/strategy.d.ts",
       "import": "./dist/strategy.js",
       "require": "./dist/strategy.cjs"
+    },
+    "./keeper": {
+      "types": "./dist/keeper.d.ts",
+      "import": "./dist/keeper.js",
+      "require": "./dist/keeper.cjs"
     }
   },
   "files": [

@@ -1,0 +1,29 @@
+[package]
+name = "txline-demo-escrow"
+version = "0.1.0"
+description = "Valueless-token escrow demonstrating TxLINE CPI settlement"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "txline_demo_escrow"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+
+[dependencies]
+anchor-lang = { workspace = true, features = ["init-if-needed"] }
+anchor-spl = { workspace = true, default-features = false, features = ["associated_token", "token", "token_2022"] }
+txline-kit-cpi = { path = "../../crates/txline-kit-cpi" }
