@@ -1,0 +1,23 @@
+# TxLINE Capture and Kit intentionally share one product-family slot.
+repo: txline-capture
+purposes:
+  - name: txline-kit-prod
+    type: backend
+    env: prod
+    canonical: 38720
+  - name: txline-kit-dev-server
+    type: backend
+    env: dev
+    canonical: 38750
+  - name: txline-kit-dev-web
+    type: frontend
+    env: dev
+    canonical: 58040
+  - name: txline-kit-test-server
+    type: backend
+    env: test
+    canonical: 38770
+  - name: txline-kit-test-web
+    type: frontend
+    env: test
+    canonical: 58070

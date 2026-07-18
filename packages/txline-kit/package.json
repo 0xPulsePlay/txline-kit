@@ -1,0 +1,25 @@
+{
+  "name": "@0xpulseplay/txline-kit",
+  "version": "0.0.0",
+  "description": "Safe TypeScript, replay, and Solana CPI tooling for TxLINE",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "bin": { "txline-replay": "dist/cli.js" },
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./replay": { "types": "./dist/recording.d.ts", "import": "./dist/recording.js" }
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.0.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.3"
+  }
+}
