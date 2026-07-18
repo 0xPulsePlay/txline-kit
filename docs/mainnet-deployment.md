@@ -21,6 +21,21 @@ The local program was then closed using the retained authority, reclaiming `2.78
 
 After mainnet finalization, the program was dumped back from the cluster. Its SHA-256 matched the local deployment artifact exactly.
 
+## Mainnet escrow proof
+
+The full valueless consumer flow subsequently ran against the deployed program and live TxLINE oracle using fixture `18241006`, sequence `962`, and a proven final score of home `1`, away `2`.
+
+- [Initialize market](https://solscan.io/tx/u5DEEjmykDRvWVSxuf2m9ktpC6n3Y9aGYiUBGvRW1XSnJkqS4WXN5TJBNMjifnTgM624XTQmQp4pA7At8faEUUC)
+- [Enter home](https://solscan.io/tx/4XNyk8bDK3NbuHRYLRaVCgCZvKajJAZrjTMCGdstFKPJgEG1AzELYD2hwdNuzV1z59cwYHioPjwNDwAjVvJrBuAu)
+- [Enter away](https://solscan.io/tx/zVF3w6KdVbBRWwV5tgyXi85X9ZRaPPhf29tueuRRFaJtqwxnuUUqJTsLqhhYnaiH1BTzozcmkfM6XKhPDo7nMTe)
+- [Settle through TxLINE CPI](https://solscan.io/tx/52kbagjiugz6bL7TPwRZmHYGpGPoLBycpoZQH9uSyqkyMaNb7E1hhuamt72Bfg2obaq2vLxngBQZvRzbJ5Rd5kok)
+- [Winner claim](https://solscan.io/tx/5qD5LaKjveKwxJpvtMfz3qxkdDSgoUz2NXfUTukkUWFSZoqSY5f3CfggVrHsxZsnVg55XUwJfrxy7ZMhWfPYXpJt)
+- [Close empty market and vault](https://solscan.io/tx/2mPAhTuruGLbjihsvxXgXZd6Pisb2Nb9kYA3efxybR8Uc7yDicjLxjYcYLPR8yqK9dWGcTUvA8Ec4FHe91BeC5Ad)
+
+The settlement finalized in slot `433642899`, consumed `216993` compute units, invoked TxLINE at CPI depth two, and received `AQ==`—the exact one-byte true result—from the TxLINE program. The winner received all `2000` valueless token units. Both positions, the empty market vault, the market, both player token accounts, and the Token-2022 mint were then closed. The demo program itself remains deployed and upgradeable.
+
+The mainnet UAT runner deliberately persists disposable signer checkpoints outside Git before its first write, verifies the mainnet genesis hash, requires an explicit confirmation phrase, supports idempotent setup resumption, and closes all temporary accounts after reconciliation.
+
 To verify independently:
 
 ```sh
