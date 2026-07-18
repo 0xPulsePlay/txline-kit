@@ -35,6 +35,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 24, cache: pnpm }
       - run: pnpm install --frozen-lockfile
+      - run: echo "TXLINE_TEST_WEB_PORT=$(node scripts/declared-port.mjs txline-kit-test-web)" >> "$GITHUB_ENV"
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm proof:report -- 0
       - run: pnpm test:e2e

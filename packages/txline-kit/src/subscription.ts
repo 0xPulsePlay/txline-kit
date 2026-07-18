@@ -1,12 +1,7 @@
 import * as anchor from "@coral-xyz/anchor";
 import type { Idl } from "@coral-xyz/anchor";
-import {
-  ASSOCIATED_TOKEN_PROGRAM_ID,
-  TOKEN_2022_PROGRAM_ID,
-  createAssociatedTokenAccountInstruction,
-  getAssociatedTokenAddressSync,
-} from "@solana/spl-token";
 import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
+import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, associatedTokenAddress, createAssociatedTokenAccountInstruction } from "./associated-token.js";
 import type { ResolvedClientConfig, TxLineWallet, WalletAdapterLike } from "./core.js";
 import { walletPublicKey } from "./core.js";
 import { ConfigurationError } from "./errors.js";
@@ -64,10 +59,10 @@ export async function submitFreeSubscription(
     });
   }
   const publicKey = walletPublicKey(wallet);
-  const userTokenAccount = getAssociatedTokenAddressSync(config.tokenMint, publicKey, false, TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID);
+  const userTokenAccount = associatedTokenAddress(config.tokenMint, publicKey);
   const preInstructions = [];
   if (!(await config.connection.getAccountInfo(userTokenAccount, "confirmed"))) {
-    preInstructions.push(createAssociatedTokenAccountInstruction(publicKey, userTokenAccount, publicKey, config.tokenMint, TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID));
+    preInstructions.push(createAssociatedTokenAccountInstruction(publicKey, userTokenAccount, publicKey, config.tokenMint));
   }
   const [pricingMatrix] = PublicKey.findProgramAddressSync([new TextEncoder().encode("pricing_matrix")], program.programId);
   const matrix = await (program.account as unknown as {
@@ -80,7 +75,7 @@ export async function submitFreeSubscription(
     });
   }
   const [tokenTreasuryPda] = PublicKey.findProgramAddressSync([new TextEncoder().encode("token_treasury_v2")], program.programId);
-  const tokenTreasuryVault = getAssociatedTokenAddressSync(config.tokenMint, tokenTreasuryPda, true, TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID);
+  const tokenTreasuryVault = associatedTokenAddress(config.tokenMint, tokenTreasuryPda);
   const builder = (program.methods as unknown as {
     subscribe(level: number, weeks: number): {
       accounts(accounts: Record<string, PublicKey>): { preInstructions(ix: unknown[]): { rpc(): Promise<string> } };

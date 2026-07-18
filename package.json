@@ -3,9 +3,9 @@
   "private": true,
   "packageManager": "pnpm@10.14.0",
   "scripts": {
-    "build": "pnpm --filter @0xpulseplay/txline-kit build",
+    "build": "pnpm --filter @0xpulseplay/txline-kit build && pnpm --filter @0xpulseplay/txline-learn build",
     "check": "pnpm typecheck && pnpm test",
-    "typecheck": "pnpm --filter @0xpulseplay/txline-kit typecheck",
+    "typecheck": "pnpm --filter @0xpulseplay/txline-kit typecheck && pnpm --filter @0xpulseplay/txline-learn typecheck",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
