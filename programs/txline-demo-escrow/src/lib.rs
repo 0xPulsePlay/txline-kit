@@ -3,7 +3,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
-    token_interface::{self, Mint, TokenAccount, TokenInterface, TransferChecked},
+    token_interface::{self, CloseAccount, Mint, TokenAccount, TokenInterface, TransferChecked},
 };
 use txline_cpi::{
     validate_stat_v2_cpi, BinaryExpression, Comparison, NDimensionalStrategy, StatPredicate,
@@ -45,6 +45,7 @@ pub mod txline_demo_escrow {
         market.pools = [0; 3];
         market.paid_out = 0;
         market.claimed_winning_stake = 0;
+        market.open_positions = 0;
         market.settled = false;
         market.bump = ctx.bumps.market;
         emit!(MarketInitialized {
@@ -73,6 +74,10 @@ pub mod txline_demo_escrow {
             position.stake = 0;
             position.claimed = false;
             position.bump = ctx.bumps.position;
+            market.open_positions = market
+                .open_positions
+                .checked_add(1)
+                .ok_or(EscrowError::ArithmeticOverflow)?;
         } else {
             require!(position.side == side, EscrowError::PositionSideLocked);
             require!(!position.claimed, EscrowError::AlreadyClaimed);
@@ -325,6 +330,61 @@ pub mod txline_demo_escrow {
         });
         Ok(())
     }
+
+    pub fn close_position(ctx: Context<ClosePosition>) -> Result<()> {
+        let market = &mut ctx.accounts.market;
+        let position = &ctx.accounts.position;
+        let terminal = if market.settled {
+            let outcome = market.outcome.ok_or(EscrowError::NotSettled)?;
+            position.side != outcome || position.claimed
+        } else {
+            Clock::get()?.unix_timestamp >= market.refund_after && position.claimed
+        };
+        require!(terminal, EscrowError::PositionNotTerminal);
+        market.open_positions = market
+            .open_positions
+            .checked_sub(1)
+            .ok_or(EscrowError::ArithmeticOverflow)?;
+        emit!(PositionClosed {
+            market: market.key(),
+            owner: position.owner,
+        });
+        Ok(())
+    }
+
+    pub fn close_market(ctx: Context<CloseMarket>) -> Result<()> {
+        let market = &ctx.accounts.market;
+        require!(market.open_positions == 0, EscrowError::OpenPositionsRemain);
+        require!(
+            market.settled || Clock::get()?.unix_timestamp >= market.refund_after,
+            EscrowError::MarketNotTerminal
+        );
+        require_eq!(market.paid_out, market.total_pool, EscrowError::UnpaidFunds);
+        require_eq!(ctx.accounts.vault.amount, 0, EscrowError::UnpaidFunds);
+
+        let fixture_bytes = market.fixture_id.to_le_bytes();
+        let bump = [market.bump];
+        let signer_seeds: &[&[u8]] = &[
+            b"market",
+            market.authority.as_ref(),
+            fixture_bytes.as_ref(),
+            bump.as_ref(),
+        ];
+        token_interface::close_account(CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            CloseAccount {
+                account: ctx.accounts.vault.to_account_info(),
+                destination: ctx.accounts.authority.to_account_info(),
+                authority: market.to_account_info(),
+            },
+            &[signer_seeds],
+        ))?;
+        emit!(MarketClosed {
+            market: market.key(),
+            authority: market.authority,
+        });
+        Ok(())
+    }
 }
 
 fn strategy_for(outcome: Outcome) -> NDimensionalStrategy {
@@ -501,6 +561,45 @@ pub struct Refund<'info> {
     pub token_program: Interface<'info, TokenInterface>,
 }
 
+#[derive(Accounts)]
+pub struct ClosePosition<'info> {
+    #[account(mut)]
+    pub owner: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [b"market", market.authority.as_ref(), &market.fixture_id.to_le_bytes()],
+        bump = market.bump
+    )]
+    pub market: Account<'info, Market>,
+    #[account(
+        mut,
+        close = owner,
+        seeds = [b"position", market.key().as_ref(), owner.key().as_ref()],
+        bump = position.bump,
+        has_one = market,
+        constraint = position.owner == owner.key() @ EscrowError::PositionOwnerMismatch
+    )]
+    pub position: Account<'info, Position>,
+}
+
+#[derive(Accounts)]
+pub struct CloseMarket<'info> {
+    #[account(mut, address = market.authority)]
+    pub authority: Signer<'info>,
+    #[account(
+        mut,
+        close = authority,
+        seeds = [b"market", market.authority.as_ref(), &market.fixture_id.to_le_bytes()],
+        bump = market.bump,
+        has_one = vault,
+        constraint = market.token_program == token_program.key() @ EscrowError::TokenProgramMismatch
+    )]
+    pub market: Account<'info, Market>,
+    #[account(mut, address = market.vault)]
+    pub vault: InterfaceAccount<'info, TokenAccount>,
+    pub token_program: Interface<'info, TokenInterface>,
+}
+
 #[account]
 #[derive(InitSpace)]
 pub struct Market {
@@ -517,6 +616,7 @@ pub struct Market {
     pub pools: [u64; 3],
     pub paid_out: u64,
     pub claimed_winning_stake: u64,
+    pub open_positions: u64,
     pub settled: bool,
     pub bump: u8,
 }
@@ -591,6 +691,18 @@ pub struct PositionRefunded {
     pub amount: u64,
 }
 
+#[event]
+pub struct PositionClosed {
+    pub market: Pubkey,
+    pub owner: Pubkey,
+}
+
+#[event]
+pub struct MarketClosed {
+    pub market: Pubkey,
+    pub authority: Pubkey,
+}
+
 #[error_code]
 pub enum EscrowError {
     #[msg("fixture_id must be positive")]
@@ -641,6 +753,14 @@ pub enum EscrowError {
     UnsupportedTransferBehavior,
     #[msg("refund deadline has not passed")]
     RefundTooEarly,
+    #[msg("position must be paid, refunded, or a settled loser before it can close")]
+    PositionNotTerminal,
+    #[msg("all position accounts must close before the market")]
+    OpenPositionsRemain,
+    #[msg("market has not settled and its refund deadline has not passed")]
+    MarketNotTerminal,
+    #[msg("escrow still contains unpaid funds")]
+    UnpaidFunds,
 }
 
 #[cfg(test)]

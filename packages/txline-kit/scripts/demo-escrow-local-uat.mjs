@@ -266,6 +266,53 @@ if (refundAfterBalance.amount !== 500n || refundVaultAfter.amount !== 0n) {
   throw new Error(`unexpected refund player=${refundAfterBalance.amount} vault=${refundVaultAfter.amount}`);
 }
 
+const prematureMarketClose = await expectFailure("market close while positions remain", () => program.methods.closeMarket().accountsStrict({
+  authority: payer.publicKey,
+  market,
+  vault,
+  tokenProgram: TOKEN_2022_PROGRAM_ID,
+}).rpc());
+const closeHomePositionSignature = await program.methods.closePosition().accountsStrict({
+  owner: homePlayer.publicKey,
+  market,
+  position: homePosition,
+}).signers([homePlayer]).rpc();
+const closeAwayPositionSignature = await program.methods.closePosition().accountsStrict({
+  owner: awayPlayer.publicKey,
+  market,
+  position: awayPosition,
+}).signers([awayPlayer]).rpc();
+const closeMarketSignature = await program.methods.closeMarket().accountsStrict({
+  authority: payer.publicKey,
+  market,
+  vault,
+  tokenProgram: TOKEN_2022_PROGRAM_ID,
+}).rpc();
+const closeRefundPositionSignature = await program.methods.closePosition().accountsStrict({
+  owner: refundPlayer.publicKey,
+  market: refundMarket,
+  position: refundPosition,
+}).signers([refundPlayer]).rpc();
+const closeRefundMarketSignature = await program.methods.closeMarket().accountsStrict({
+  authority: refundPlayer.publicKey,
+  market: refundMarket,
+  vault: refundVault,
+  tokenProgram: TOKEN_2022_PROGRAM_ID,
+}).signers([refundPlayer]).rpc();
+
+const closedAccounts = await connection.getMultipleAccountsInfo([
+  homePosition,
+  awayPosition,
+  market,
+  vault,
+  refundPosition,
+  refundMarket,
+  refundVault,
+], "confirmed");
+if (closedAccounts.some((account) => account !== null)) {
+  throw new Error("escrow teardown left a position, market, or vault account allocated");
+}
+
 console.log(JSON.stringify({
   outcome: "PASS",
   fixtureId,
@@ -276,7 +323,8 @@ console.log(JSON.stringify({
   txlineProgram: txlineProgramId.toBase58(),
   market: market.toBase58(),
   mint: mint.toBase58(),
-  transactions: { initializeSignature, enterHomeSignature, enterAwaySignature, settleSignature, claimSignature, initializeRefundSignature, enterRefundSignature, refundSignature },
+  transactions: { initializeSignature, enterHomeSignature, enterAwaySignature, settleSignature, claimSignature, initializeRefundSignature, enterRefundSignature, refundSignature, closeHomePositionSignature, closeAwayPositionSignature, closeMarketSignature, closeRefundPositionSignature, closeRefundMarketSignature },
   balances: { home: homeAfter.amount.toString(), away: awayAfter.amount.toString(), vault: vaultAfter.amount.toString(), refunded: refundAfterBalance.amount.toString(), refundVault: refundVaultAfter.amount.toString() },
-  negativeTests: [tooEarly.label, wrongOutcome.label, settlementAfterRefundDeadline.label, losingClaim.label, doubleClaim.label, earlyRefund.label, doubleRefund.label],
+  teardown: { escrowAccountsClosed: closedAccounts.length, programUpgradeableLoaderClosePending: true },
+  negativeTests: [tooEarly.label, wrongOutcome.label, settlementAfterRefundDeadline.label, losingClaim.label, doubleClaim.label, earlyRefund.label, doubleRefund.label, prematureMarketClose.label],
 }, null, 2));
