@@ -26,6 +26,13 @@ PASS — the public learning app turns synthetic TxLINE recordings and the final
 - Deliberate ten-image visual proof matrix: PASS after animation-settle review.
 - Production dependency audit: no Critical or High advisory; one documented Moderate advisory remains in Web3's unused UUID name-based API path.
 
+## Deployment
+
+- Public production: `https://txline-kit.claude.do` (HTTP 200).
+- Access-protected development: `https://txline-kit-dev.claude.do` (unauthenticated HTTP 302 to Cloudflare Access).
+- Commit release: `21396bb-20260718T075242Z`.
+- Rollback rehearsal: switched production to `20260718T074815Z-b92b99e`, verified HTTP 200, then restored the commit release and reverified local and public HTTP 200.
+
 ## Dependency release gate
 
 The published SDK no longer ships `@solana/spl-token` as a runtime dependency. A minimal internal Token-2022 ATA helper is byte-for-byte tested against SPL Token for program IDs, address derivation, account metas, and instruction data. SPL Token remains dev-only for equivalence tests and deployment scripts.

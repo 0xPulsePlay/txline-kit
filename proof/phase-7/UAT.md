@@ -12,6 +12,8 @@
 8. Exercise spatial controls with keyboard focus and Enter as well as pointer navigation.
 9. Scan every viewport for serious/critical accessibility defects and horizontal overflow.
 10. Capture and visually inspect every major screen plus responsive overview states.
+11. Verify public production, dev Access redirect, prod/dev service isolation, and Caddy host routing.
+12. Roll production back between two immutable release selectors and restore the commit release.
 
 ## Findings and fixes
 
