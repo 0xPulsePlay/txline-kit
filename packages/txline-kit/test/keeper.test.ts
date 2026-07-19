@@ -41,6 +41,50 @@ describe("keeper preparation", () => {
     expect(Object.isFrozen(prepared)).toBe(true);
   });
 
+  test("does not wait for slow root anchoring by default; opts in via proofRetry", async () => {
+    const bydefault = harness();
+    const market = markets.finalResult(fixtureId).awayWin();
+    await bydefault.keeper.prepare({ fixtureId, market });
+    // No options at all: single-attempt, fail-fast contract (v0.1.0 parity) --
+    // no retry key should reach ProofClient.fetch.
+    expect(bydefault.proofs.fetch).toHaveBeenCalledWith({ fixtureId, seq: 7, statKeys: [1, 2] });
+
+    const optedIn = harness();
+    await optedIn.keeper.prepare({ fixtureId, market, proofRetry: true });
+    expect(optedIn.proofs.fetch).toHaveBeenCalledWith(expect.objectContaining({ retry: { timeoutMs: 180_000 } }));
+
+    const tuned = harness();
+    const controller = new AbortController();
+    await tuned.keeper.prepare({ fixtureId, market, signal: controller.signal, proofRetry: { timeoutMs: 30_000, initialDelayMs: 250 } });
+    expect(tuned.proofs.fetch).toHaveBeenCalledWith(expect.objectContaining({
+      retry: { timeoutMs: 30_000, initialDelayMs: 250, signal: controller.signal },
+    }));
+
+    const disabled = harness();
+    await disabled.keeper.prepare({ fixtureId, market, proofRetry: false });
+    expect(disabled.proofs.fetch).toHaveBeenCalledWith({ fixtureId, seq: 7, statKeys: [1, 2] });
+  });
+
+  test("threads the caller's signal into the default (proofRetry omitted/false) proof fetch so aborting can cancel it", async () => {
+    // Regression: the default fail-fast path only ever forwarded `signal`
+    // to ProofClient.fetch INSIDE a `retry` policy (via resolveProofRetry),
+    // which is only populated when proofRetry is truthy. With proofRetry
+    // omitted or false, no top-level `signal` reached the fetch call at
+    // all, so aborting a default keeper settlement could not cancel its
+    // in-flight proof HTTP request.
+    const market = markets.finalResult(fixtureId).awayWin();
+
+    const omitted = harness();
+    const controllerOmitted = new AbortController();
+    await omitted.keeper.prepare({ fixtureId, market, signal: controllerOmitted.signal });
+    expect(omitted.proofs.fetch).toHaveBeenCalledWith({ fixtureId, seq: 7, statKeys: [1, 2], signal: controllerOmitted.signal });
+
+    const disabledWithSignal = harness();
+    const controllerDisabled = new AbortController();
+    await disabledWithSignal.keeper.prepare({ fixtureId, market, proofRetry: false, signal: controllerDisabled.signal });
+    expect(disabledWithSignal.proofs.fetch).toHaveBeenCalledWith({ fixtureId, seq: 7, statKeys: [1, 2], signal: controllerDisabled.signal });
+  });
+
   test("refuses mismatched fixtures, missing sequences, false predicates, and aborted work", async () => {
     await expect(harness().keeper.prepare({ fixtureId, market: markets.finalResult(41).homeWin() })).rejects.toMatchObject({ code: "KEEPER_FIXTURE_MISMATCH" });
     await expect(harness({ record: { fixtureId, action: "game_finalised", statusId: 100 } }).keeper.prepare({ fixtureId, market: markets.finalResult(fixtureId).homeWin() })).rejects.toMatchObject({ code: "KEEPER_FINAL_SEQ_MISSING" });
