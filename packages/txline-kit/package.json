@@ -73,6 +73,11 @@
       "import": "./dist/journal.js",
       "require": "./dist/journal.cjs"
     },
+    "./lifecycle": {
+      "types": "./dist/lifecycle.d.ts",
+      "import": "./dist/lifecycle.js",
+      "require": "./dist/lifecycle.cjs"
+    },
     "./strategy": {
       "types": "./dist/strategy.d.ts",
       "import": "./dist/strategy.js",
