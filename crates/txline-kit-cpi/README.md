@@ -43,10 +43,12 @@ pub enum SettlementError {
 }
 ```
 
-Mainnet is the default. For devnet:
+crates.io publication is deferred (see [`docs/registry-publication-checklist.md`](../../docs/registry-publication-checklist.md)); depend on the crate via git:
 
 ```toml
-txline-kit-cpi = { version = "0.1", default-features = false, features = ["devnet"] }
+txline-kit-cpi = { git = "https://github.com/0xPulsePlay/txline-kit", default-features = false, features = ["devnet"] }
 ```
+
+Mainnet is the default (drop `default-features = false` and the `devnet` feature).
 
 Do not enable `mainnet` and `devnet` together. This crate is integration tooling, not a security audit of TxLINE or a consumer settlement program.

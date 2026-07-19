@@ -20,6 +20,6 @@ Phase 6 adds a bounded keeper workflow and a valueless three-outcome Anchor escr
 
 Phase 7 adds six public learning surfaces for replay, predicate slicing, Merkle proof anatomy, the finalized mainnet settlement, and SDK boundaries. All bundled matches are synthetic; the settlement receipt is public chain data.
 
-Phase 8 publishes `@0xpulseplay/txline-kit` and `txline-kit-cpi`, verifies both from clean consumers, makes the two 0xPulsePlay repositories public, and records the final release evidence.
+Phase 8 prepares `@0xpulseplay/txline-kit` and `txline-kit-cpi` for registry release, makes the two 0xPulsePlay repositories public, and records the final release evidence. npm and crates.io publication is deliberately deferred — see [`docs/registry-publication-checklist.md`](docs/registry-publication-checklist.md); install from source per the package READMEs.
 
 This is hackathon integration software, not an audit or real-money wagering product. See [`goal.md`](goal.md) for the explicit safety boundary and acceptance contract.

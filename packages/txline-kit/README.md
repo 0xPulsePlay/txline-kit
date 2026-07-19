@@ -4,8 +4,12 @@ Typed TxLINE authentication, normalized score and odds data, resilient SSE strea
 
 ## Install
 
+npm publication is deferred (see [`docs/registry-publication-checklist.md`](../../docs/registry-publication-checklist.md)); install from source:
+
 ```sh
-pnpm add @0xpulseplay/txline-kit
+git clone https://github.com/0xPulsePlay/txline-kit
+cd txline-kit
+pnpm install && pnpm build
 ```
 
 Node.js 20 or newer is required. The package ships ESM and CommonJS entry points.
