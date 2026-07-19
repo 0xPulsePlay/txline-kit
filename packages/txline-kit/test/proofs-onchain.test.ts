@@ -218,6 +218,31 @@ describe("proof availability retry", () => {
     await expect(proofs.fetch({ fixtureId: 1, seq: 1, statKeys: [1] })).rejects.toMatchObject({ status: 404 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  test("ProofClient.forFinal aborts the proof-availability wait promptly instead of exhausting the retry budget", async () => {
+    // Regression for the wi-1 review bug: forFinal only threaded its top-level
+    // AbortSignal into data.awaitFinal, never into the retry policy handed to
+    // waitForProofAvailability, so aborting mid-wait had no effect on the
+    // proof retry loop and callers had to wait out the full timeout.
+    const fetchMock = vi.fn(async () => new Response("not anchored", { status: 404 }));
+    const http = new HttpPipeline(resolveClientConfig({ network: "mainnet", baseUrl: "http://replay.test", fetch: fetchMock }));
+    const data = { awaitFinal: vi.fn(async () => ({ seq: 400 })) } as unknown as DataClient;
+    const proofs = new ProofClient(http, data);
+    const controller = new AbortController();
+    // A large retry budget: if the abort signal is not honored, this would
+    // only reject after ~5 minutes (or never, in this mocked test run).
+    const waiting = proofs.forFinal(18_241_006, {
+      signal: controller.signal,
+      retry: { initialDelayMs: 60_000, maximumDelayMs: 60_000, timeoutMs: 300_000 },
+    });
+    const started = Date.now();
+    queueMicrotask(() => controller.abort(new Error("caller stop")));
+    await expect(waiting).rejects.toThrow("caller stop");
+    expect(Date.now() - started).toBeLessThan(2_000);
+    // Only the initial attempt (if any) should have fired before the abort
+    // short-circuited the backoff wait; it must not have retried repeatedly.
+    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(1);
+  });
 });
 
 describe("root PDA namespaces and timestamp healing", () => {
@@ -254,5 +279,55 @@ describe("root PDA namespaces and timestamp healing", () => {
     expect(() => deriveRootPda({ namespace: "daily_odds_roots" as never, timestamp: millis, programId })).toThrow(expect.objectContaining({ code: "PDA_NAMESPACE_INVALID" }));
     expect(() => deriveRootPda({ namespace: "daily_scores_roots", timestamp: 65_536 * 86_400_000, programId })).toThrow(expect.objectContaining({ code: "PDA_EPOCH_OVERFLOW" }));
     expect(() => healTimestampMillis(Number.NaN)).toThrow(expect.objectContaining({ code: "PDA_TIMESTAMP_INVALID" }));
+  });
+
+  describe("Date inputs are unambiguous and bypass the seconds heuristic", () => {
+    // A value under SECONDS_SUSPECT_BOUND (100_000_000_000, ~March 1973) that
+    // is nonetheless a legitimate millisecond timestamp: e.g. a synthetic
+    // fixture clock, or any real epoch time before 1973. Passed as a raw
+    // number it is ambiguous and the existing heuristic is expected to heal
+    // it (multiply by 1000). Passed as a `Date`, the unit is certain — the
+    // caller got it from `.getTime()` or `Date.now()` — and healing it would
+    // silently corrupt an otherwise-correct timestamp.
+    const smallMillis = 50_000_000_000; // 1971-08-02T... well under the bound
+
+    test("healTimestampMillis uses a Date's getTime() exactly, never reinterpreting it as seconds", () => {
+      expect(healTimestampMillis(new Date(smallMillis))).toBe(smallMillis);
+      // The identical numeric value, passed as a raw number, is ambiguous and
+      // is still healed the old way — proving the fix is Date-specific, not
+      // a change to the heuristic bound itself.
+      expect(healTimestampMillis(smallMillis)).toBe(smallMillis * 1_000);
+    });
+
+    test("healTimestampMillis honors an explicit unit override for raw numbers, bypassing the heuristic", () => {
+      expect(healTimestampMillis(smallMillis, "ms")).toBe(smallMillis);
+      expect(healTimestampMillis(seconds, "s")).toBe(seconds * 1_000);
+    });
+
+    test("the heuristic still fires correctly for raw-number seconds vs milliseconds from external data", () => {
+      // Large-but-valid seconds timestamp near the bound (100_000_000_000):
+      // still ambiguous as a raw number, still healed.
+      const nearBoundSeconds = 99_999_999; // *1_000 = 99_999_999_000, just under the bound
+      expect(healTimestampMillis(nearBoundSeconds)).toBe(nearBoundSeconds * 1_000);
+      // Comfortably-milliseconds raw number (current, real epoch time): left
+      // untouched.
+      expect(healTimestampMillis(millis)).toBe(millis);
+    });
+
+    test("dailyScoresPda derives directly from a Date's getTime() instead of throwing PDA_TIMESTAMP_UNIT_SUSPECT", () => {
+      const epochDay = Math.floor(smallMillis / 86_400_000);
+      expect(dailyScoresPda(new Date(smallMillis), programId).toBase58()).toBe(expected("daily_scores_roots", epochDay));
+      // The same value as a raw number remains ambiguous and still throws —
+      // proving dailyScoresPda's Date handling, not its safety check, changed.
+      expect(() => dailyScoresPda(smallMillis, programId)).toThrow(expect.objectContaining({ code: "PDA_TIMESTAMP_UNIT_SUSPECT" }));
+    });
+
+    test("deriveRootPda accepts a Date and an explicit timestampUnit override without misclassifying small values", () => {
+      const epochDay = Math.floor(smallMillis / 86_400_000);
+      expect(deriveRootPda({ namespace: "daily_scores_roots", timestamp: new Date(smallMillis), programId }).toBase58())
+        .toBe(expected("daily_scores_roots", epochDay));
+      expect(deriveRootPda({ namespace: "daily_scores_roots", timestamp: smallMillis, timestampUnit: "ms", programId }).toBase58())
+        .toBe(expected("daily_scores_roots", epochDay));
+    });
   });
 });
