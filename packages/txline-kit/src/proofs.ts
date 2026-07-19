@@ -40,6 +40,10 @@ export interface FetchProofOptions {
   seq: number;
   statKeys: readonly number[];
   retry?: ProofRetryPolicy | true;
+  /** Cancel the fetch even when no retry policy is active. Independent from
+   * `retry`'s own signal, which additionally governs the backoff loop once
+   * retry is enabled; passing `signal` alone must not switch on retry. */
+  signal?: AbortSignal;
 }
 
 export interface FinalProofOptions {
@@ -188,11 +192,15 @@ function sleepUnlessAborted(ms: number, signal?: AbortSignal): Promise<void> {
       reject(signal.reason);
       return;
     }
-    const timer = setTimeout(() => resolve(), ms);
-    signal?.addEventListener("abort", () => {
+    const abort = () => {
       clearTimeout(timer);
-      reject(signal.reason);
-    }, { once: true });
+      reject(signal?.reason);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", abort, { once: true });
   });
 }
 
@@ -293,9 +301,10 @@ export class ProofClient {
   async fetch(options: FetchProofOptions): Promise<ProofBundle> {
     requireRequest(options);
     const retrySignal = options.retry && options.retry !== true ? options.retry.signal : undefined;
+    const requestSignal = retrySignal ?? options.signal;
     const once = async (): Promise<ProofBundle> => {
       const query = new URLSearchParams({ fixtureId: String(options.fixtureId), seq: String(options.seq), statKeys: options.statKeys.join(",") });
-      const response = await this.http.request(`/scores/stat-validation?${query}`, retrySignal ? { signal: retrySignal } : {});
+      const response = await this.http.request(`/scores/stat-validation?${query}`, requestSignal ? { signal: requestSignal } : {});
       await this.http.expectOk(response, "score stat proof");
       let raw: unknown;
       try { raw = await response.json(); } catch (cause) {
@@ -328,14 +337,20 @@ export class ProofClient {
     return waitForProofAvailability(once, options.retry === true ? {} : options.retry);
   }
 
+  /** `retry` stays opt-in even when `signal` is supplied: a caller passing
+   * only a cancellation signal must keep the documented single-attempt
+   * fail-fast default, not silently gain a bounded multi-minute retry wait.
+   * The signal still cancels the one HTTP attempt via `fetch`'s own
+   * `signal` field, independent of whether retry is active. */
   async forFinal(fixtureId: number, options: FinalProofOptions = {}): Promise<ProofBundle> {
     const final = await this.data.awaitFinal(fixtureId, options.signal ? { signal: options.signal } : {});
-    const retry = mergeRetrySignal(options.retry, options.signal);
+    const retry = options.retry === undefined ? undefined : mergeRetrySignal(options.retry, options.signal);
     return this.fetch({
       fixtureId,
       seq: recordSeq(final),
       statKeys: options.statKeys ?? [1, 2],
       ...(retry === undefined ? {} : { retry }),
+      ...(options.signal ? { signal: options.signal } : {}),
     });
   }
 }

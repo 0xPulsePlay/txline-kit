@@ -157,6 +157,31 @@ describe("implied probabilities", () => {
     expect(Object.isFrozen(result)).toBe(true);
   });
 
+  test("scales an exact 1% outcome to 0.01, not 100%", () => {
+    // Regression for the H1 review bug: `value > 1 ? value / 100 : value`
+    // left a "1" percentage un-divided, producing probability 1 (100%)
+    // instead of 0.01 (1%).
+    const result = impliedProbabilities({ ...base, percentages: ["1", "1", "98"] } as CanonicalOddsRecord);
+    expect(result.source).toBe("percentages");
+    expect(result.home).toBeCloseTo(0.01, 6);
+    expect(result.draw).toBeCloseTo(0.01, 6);
+    expect(result.away).toBeCloseTo(0.98, 6);
+    expect(result.home + result.draw + result.away).toBeCloseTo(1, 12);
+  });
+
+  test("scales a sub-1% outcome to its true fraction, not an inflated 80%", () => {
+    // Regression for the H1 review bug: `value > 1 ? value / 100 : value`
+    // left "0.8" un-divided, producing probability 0.8 (80%) instead of
+    // 0.008 (0.8%).
+    const result = impliedProbabilities({ ...base, percentages: ["0.8", "1.2", "98"] } as CanonicalOddsRecord);
+    expect(result.source).toBe("percentages");
+    expect(result.home).toBeCloseTo(0.008, 6);
+    expect(result.home).toBeLessThan(0.01);
+    expect(result.draw).toBeCloseTo(0.012, 6);
+    expect(result.away).toBeCloseTo(0.98, 6);
+    expect(result.home + result.draw + result.away).toBeCloseTo(1, 12);
+  });
+
   test("inverts decimal prices and detects TxLINE's milli-odds scaling", () => {
     const plain = impliedProbabilities({ ...base, prices: [1.85, 3.9, 4.75] } as CanonicalOddsRecord);
     const milli = impliedProbabilities({ ...base, prices: [1_850, 3_900, 4_750] } as CanonicalOddsRecord);
