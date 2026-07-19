@@ -5,6 +5,7 @@ import {
   classifyScoreEvent,
   epochDay,
   finalisationEvidence,
+  impliedProbabilities,
   isStrictFinalisation,
   isSettlementFinalisation,
   normalizeOddsRecord,
@@ -12,6 +13,7 @@ import {
   semanticEvents,
   updateBucket,
 } from "../src/data.js";
+import type { CanonicalOddsRecord } from "../src/data.js";
 import { HttpPipeline } from "../src/http.js";
 import { resolveClientConfig } from "../src/core.js";
 import { parseSseBlock, SseDecoder, streamSse } from "../src/sse.js";
@@ -140,5 +142,45 @@ describe("historical, live, and odds adapters", () => {
     const odds = tx.data.odds.stream({ minRetryMs: 0 });
     await expect(odds.next()).resolves.toMatchObject({ value: { fixtureId: 7, messageId: "o1", prices: [2.1] } });
     await odds.return(undefined);
+  });
+});
+
+describe("implied probabilities", () => {
+  const base = { fixtureId: 42, priceNames: ["Home", "Draw", "Away"] };
+
+  test("prefers percentages and normalizes away the margin", () => {
+    const result = impliedProbabilities({ ...base, percentages: ["46.9", "29.2", "26.3"] } as CanonicalOddsRecord);
+    expect(result.source).toBe("percentages");
+    expect(result.home + result.draw + result.away).toBeCloseTo(1, 12);
+    expect(result.home).toBeCloseTo(0.469 / 1.024, 3);
+    expect(result.overround).toBeCloseTo(0.024, 3);
+    expect(Object.isFrozen(result)).toBe(true);
+  });
+
+  test("inverts decimal prices and detects TxLINE's milli-odds scaling", () => {
+    const plain = impliedProbabilities({ ...base, prices: [1.85, 3.9, 4.75] } as CanonicalOddsRecord);
+    const milli = impliedProbabilities({ ...base, prices: [1_850, 3_900, 4_750] } as CanonicalOddsRecord);
+    expect(plain.source).toBe("prices");
+    expect(milli.home).toBeCloseTo(plain.home, 12);
+    expect(milli.draw).toBeCloseTo(plain.draw, 12);
+    expect(plain.overround).toBeGreaterThan(0);
+    const forced = impliedProbabilities({ ...base, prices: [1_850, 3_900, 4_750] } as CanonicalOddsRecord, { priceScale: 1 });
+    expect(forced.home).toBeCloseTo(milli.home, 12);
+    expect(forced.overround).toBeCloseTo(milli.overround / 1_000 - 0.999, 3);
+    expect(forced.overround).toBeLessThan(-0.99);
+  });
+
+  test("matches 1/x/2 and participant selection vocabularies", () => {
+    const result = impliedProbabilities({ fixtureId: 42, priceNames: ["1", "X", "2"], prices: [2.0, 3.4, 4.2] } as CanonicalOddsRecord);
+    expect(result.home).toBeGreaterThan(result.draw);
+    const participants = impliedProbabilities({ fixtureId: 42, priceNames: ["Participant 1", "Draw", "Participant 2"], prices: [2.0, 3.4, 4.2] } as CanonicalOddsRecord);
+    expect(participants.home).toBeCloseTo(result.home, 12);
+  });
+
+  test("raises ODDS_PROBABILITIES_UNAVAILABLE instead of guessing", () => {
+    expect(() => impliedProbabilities({ fixtureId: 42 } as CanonicalOddsRecord)).toThrow(expect.objectContaining({ code: "ODDS_PROBABILITIES_UNAVAILABLE" }));
+    expect(() => impliedProbabilities({ ...base } as CanonicalOddsRecord)).toThrow(expect.objectContaining({ code: "ODDS_PROBABILITIES_UNAVAILABLE" }));
+    expect(() => impliedProbabilities({ fixtureId: 42, priceNames: ["Over", "Under"], prices: [1.9, 1.9] } as CanonicalOddsRecord)).toThrow(expect.objectContaining({ code: "ODDS_PROBABILITIES_UNAVAILABLE" }));
+    expect(() => impliedProbabilities({ ...base, prices: [0, 0, 0] } as CanonicalOddsRecord)).toThrow(expect.objectContaining({ code: "ODDS_PROBABILITIES_UNAVAILABLE" }));
   });
 });

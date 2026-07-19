@@ -95,6 +95,76 @@ export function normalizeOddsRecord(value: unknown): CanonicalOddsRecord {
   };
 }
 
+export interface ImpliedProbabilities {
+  home: number;
+  draw: number;
+  away: number;
+  /** Which record field produced the numbers. */
+  source: "percentages" | "prices";
+  /** Bookmaker margin before normalization: sum of raw implied probabilities minus one. */
+  overround: number;
+}
+
+function oddsFailure(message: string, fix: string, cause?: unknown): never {
+  throw new DataShapeError(message, { code: "ODDS_PROBABILITIES_UNAVAILABLE", fix, cause });
+}
+
+function outcomeFor(name: string): "home" | "draw" | "away" | undefined {
+  const normalized = name.trim().toLowerCase();
+  if (normalized.includes("draw") || normalized === "x") return "draw";
+  if (normalized.includes("home") || normalized.includes("participant 1") || normalized.includes("participant1") || normalized === "1") return "home";
+  if (normalized.includes("away") || normalized.includes("participant 2") || normalized.includes("participant2") || normalized === "2") return "away";
+  return undefined;
+}
+
+/** Convert a canonical odds record's raw `percentages` or decimal `prices`
+ * into a normalized match-result probability triple.
+ *
+ * Percentages are preferred when present; otherwise decimal prices are
+ * inverted, treating uniformly large values (all >= 1000) as milli-odds —
+ * TxLINE's consensus feed publishes decimal odds scaled by 1000. Pass
+ * `priceScale` to bypass that heuristic. The triple is normalized to sum to
+ * one and the pre-normalization margin is reported as `overround`. */
+export function impliedProbabilities(record: CanonicalOddsRecord, options: { priceScale?: number } = {}): ImpliedProbabilities {
+  const names = record.priceNames;
+  if (!names || names.length === 0) oddsFailure("Odds record carries no priceNames to identify outcomes", "Use a match-result odds record that names its selections (home/draw/away, participant 1/2, or 1/x/2).");
+  const raw: Partial<Record<"home" | "draw" | "away", number>> = {};
+  let source: "percentages" | "prices";
+  if (record.percentages && record.percentages.length > 0) {
+    source = "percentages";
+    const percentages = record.percentages;
+    names.forEach((name, index) => {
+      const outcome = outcomeFor(name);
+      const value = Number(percentages[index]);
+      if (outcome && Number.isFinite(value) && value > 0) raw[outcome] = value > 1 ? value / 100 : value;
+    });
+  } else if (record.prices && record.prices.length > 0) {
+    source = "prices";
+    const prices = record.prices;
+    const scale = options.priceScale ?? (prices.every((price) => price >= 1_000) ? 1_000 : 1);
+    names.forEach((name, index) => {
+      const entry = prices[index];
+      const outcome = outcomeFor(name);
+      const price = entry === undefined ? Number.NaN : entry / scale;
+      if (outcome && Number.isFinite(price) && price > 0) raw[outcome] = 1 / price;
+    });
+  } else {
+    oddsFailure("Odds record carries neither percentages nor prices", "Use a record from the odds snapshot, updates, or stream endpoints; do not strip its price arrays.");
+  }
+  if (raw.home === undefined || raw.draw === undefined || raw.away === undefined) {
+    oddsFailure(`Could not identify home, draw, and away among priceNames [${names.join(", ")}]`, "Implied probabilities support three-way match-result markets; check superOddsType and marketPeriod for the record you selected.");
+  }
+  const total = raw.home + raw.draw + raw.away;
+  if (!Number.isFinite(total) || total <= 0) oddsFailure("Implied probabilities did not sum to a positive value", "Inspect the record's price values; zero or negative prices are not usable.");
+  return Object.freeze({
+    home: raw.home / total,
+    draw: raw.draw / total,
+    away: raw.away / total,
+    source,
+    overround: total - 1,
+  });
+}
+
 function requireArray(value: unknown, operation: string): unknown[] {
   if (!Array.isArray(value)) {
     throw new DataShapeError(`${operation} returned a non-array payload`, {
