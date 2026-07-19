@@ -10,6 +10,7 @@ export default defineConfig({
     replay: "src/replay.ts",
     proofs: "src/proofs.ts",
     onchain: "src/onchain.ts",
+    merkle: "src/merkle.ts",
     strategy: "src/strategy.ts",
     keeper: "src/keeper.ts",
     cli: "src/cli.ts",
