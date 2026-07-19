@@ -2,7 +2,7 @@
 
 ## Unreleased (0.2.0)
 
-- Add `waitForProofAvailability` with bounded exponential backoff on HTTP 404/409/425, plus opt-in `retry` on `ProofClient.fetch`/`forFinal`. **Behavior change:** `keeper.prepare` now waits (bounded, 3 minutes by default) for the daily root to anchor instead of failing on the first 404; pass `proofRetry: false` for the previous single-attempt behavior.
+- Add `waitForProofAvailability` with bounded exponential backoff on HTTP 404/409/425, plus opt-in `retry` on `ProofClient.fetch`/`forFinal`. `keeper.prepare`/`watchAndSettle` keep the v0.1.0 single-attempt, fail-fast default; pass `proofRetry: true` (or an explicit policy object) to opt in to the bounded wait (3 minutes by default) for a slow-anchoring daily root.
 
 ## 0.1.0 source release — 2026-07-18
 
