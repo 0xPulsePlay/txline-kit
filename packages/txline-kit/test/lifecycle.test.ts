@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { normalizeScoreRecord } from "../src/data.js";
-import { canonicalizeJournal, journalRecord } from "../src/journal.js";
+import { canonicalizeJournal, hashCanonical, journalRecord } from "../src/journal.js";
 import {
   applyPartialProofs,
   attestJournal,
@@ -57,17 +57,43 @@ describe("proof lifecycle", () => {
   test("refuses to seal content mutated after canonicalization", async () => {
     // Regression for the wi-3 review bug (a): sealAttestation trusted the
     // contentHash recorded at canonicalization time without ever rehashing
-    // the live subject, so mutating the (shallowly-frozen-wrapper-only,
-    // deep-mutable) subject object between canonicalAttestation and
-    // sealAttestation silently sealed a record whose contentHash no longer
-    // matched its actual content.
-    const mutableSubject = { fixtureId: 42, headHash: "0xabc" };
-    const canonical = await canonicalAttestation(mutableSubject);
-    mutableSubject.headHash = "0xtampered";
+    // the live subject, so mutating the subject stored on the attestation
+    // between canonicalAttestation and sealAttestation silently sealed a
+    // record whose contentHash no longer matched its actual content.
+    //
+    // canonicalAttestation now deep-clones its subject (see the M6 fix
+    // below), so this exercises the check via the stored `canonical.subject`
+    // directly rather than the caller's original object -- mutating the
+    // caller's own object no longer reaches the attestation at all, which is
+    // exactly the M6 fix; the seal-time rehash check here still guards
+    // against direct tampering with the attestation's own subject.
+    const canonical = await canonicalAttestation({ fixtureId: 42, headHash: "0xabc" });
+    (canonical.subject as { headHash: string }).headHash = "0xtampered";
     await expect(sealAttestation(canonical, [anchor("aaaaaaaa", 1)])).rejects.toMatchObject({ code: "LIFECYCLE_CONTENT_MUTATED" });
     // Restoring the original content makes it sealable again.
-    mutableSubject.headHash = "0xabc";
+    (canonical.subject as { headHash: string }).headHash = "0xabc";
     await expect(sealAttestation(canonical, [anchor("aaaaaaaa", 1)])).resolves.toMatchObject({ state: "verified" });
+  });
+
+  test("subject stored on an attestation is independent of later mutation of the caller's original object", async () => {
+    // Regression for the M6 review bug: freeze({ ...attestation, subject })
+    // only shallow-freezes the returned attestation container; the
+    // referenced subject object itself was never cloned, so a caller
+    // mutating the same object it passed in would make the "frozen"
+    // attestation's exposed .subject reflect the mutation while
+    // .contentHash still attested to the pre-mutation bytes.
+    const original: Record<string, unknown> = { fixtureId: 42, headHash: "0xabc" };
+    const snapshot = { ...original };
+    const observed = await observeAttestation(original);
+    const canonical = await canonicalAttestation(original);
+    original.headHash = "0xtampered";
+    original.fixtureId = 999;
+    expect(observed.subject).toEqual(snapshot);
+    expect(canonical.subject).toEqual(snapshot);
+    expect(observed.subject).not.toBe(original);
+    expect(canonical.subject).not.toBe(original);
+    await expect(hashCanonical(observed.subject)).resolves.toBe(observed.contentHash);
+    await expect(hashCanonical(canonical.subject)).resolves.toBe(canonical.contentHash);
   });
 
   test("snapshots anchors at seal time so the stored record can't disagree with what was hashed", async () => {

@@ -40,6 +40,10 @@ export interface FetchProofOptions {
   seq: number;
   statKeys: readonly number[];
   retry?: ProofRetryPolicy | true;
+  /** Cancel the fetch even when no retry policy is active. Independent from
+   * `retry`'s own signal, which additionally governs the backoff loop once
+   * retry is enabled; passing `signal` alone must not switch on retry. */
+  signal?: AbortSignal;
 }
 
 export interface FinalProofOptions {
@@ -188,11 +192,15 @@ function sleepUnlessAborted(ms: number, signal?: AbortSignal): Promise<void> {
       reject(signal.reason);
       return;
     }
-    const timer = setTimeout(() => resolve(), ms);
-    signal?.addEventListener("abort", () => {
+    const abort = () => {
       clearTimeout(timer);
-      reject(signal.reason);
-    }, { once: true });
+      reject(signal?.reason);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", abort, { once: true });
   });
 }
 
@@ -293,9 +301,10 @@ export class ProofClient {
   async fetch(options: FetchProofOptions): Promise<ProofBundle> {
     requireRequest(options);
     const retrySignal = options.retry && options.retry !== true ? options.retry.signal : undefined;
+    const requestSignal = retrySignal ?? options.signal;
     const once = async (): Promise<ProofBundle> => {
       const query = new URLSearchParams({ fixtureId: String(options.fixtureId), seq: String(options.seq), statKeys: options.statKeys.join(",") });
-      const response = await this.http.request(`/scores/stat-validation?${query}`, retrySignal ? { signal: retrySignal } : {});
+      const response = await this.http.request(`/scores/stat-validation?${query}`, requestSignal ? { signal: requestSignal } : {});
       await this.http.expectOk(response, "score stat proof");
       let raw: unknown;
       try { raw = await response.json(); } catch (cause) {
@@ -313,6 +322,20 @@ export class ProofClient {
   async fetchOdds(options: OddsProofOptions): Promise<ExperimentalOddsProof> {
     if (typeof options.messageId !== "string" || options.messageId.length === 0) proofFailure("messageId must be a non-empty string", "ODDS_PROOF_MESSAGE_ID_INVALID", "Pass MessageId from a canonical odds record.");
     if (!Number.isSafeInteger(options.timestamp) || options.timestamp < 0) proofFailure("timestamp must be a non-negative integer in milliseconds", "ODDS_PROOF_TIMESTAMP_INVALID", "Pass the odds record's millisecond timestamp.");
+    // `path` is a same-origin-relative route-drift override, not a fetch
+    // destination. HttpPipeline.apiUrl passes through any absolute
+    // (http(s)://) or scheme-relative (//host/...) path UNCHANGED and the
+    // request pipeline still attaches the live JWT + X-Api-Token headers
+    // regardless of destination -- so an absolute path here would send an
+    // authenticated request to an arbitrary origin. Reject before it ever
+    // reaches this.http.request(...).
+    if (typeof options.path === "string" && (/^https?:\/\//i.test(options.path) || options.path.startsWith("//"))) {
+      proofFailure(
+        `fetchOdds path must be a same-origin-relative route, not an absolute or scheme-relative URL (received ${options.path})`,
+        "ODDS_PROOF_PATH_INVALID",
+        "Pass a relative route such as \"/odds/validation\"; absolute or scheme-relative paths would send the authenticated request to an arbitrary origin.",
+      );
+    }
     const retrySignal = options.retry && options.retry !== true ? options.retry.signal : undefined;
     const once = async (): Promise<ExperimentalOddsProof> => {
       const query = new URLSearchParams({ messageId: options.messageId, timestamp: String(options.timestamp) });
@@ -328,14 +351,20 @@ export class ProofClient {
     return waitForProofAvailability(once, options.retry === true ? {} : options.retry);
   }
 
+  /** `retry` stays opt-in even when `signal` is supplied: a caller passing
+   * only a cancellation signal must keep the documented single-attempt
+   * fail-fast default, not silently gain a bounded multi-minute retry wait.
+   * The signal still cancels the one HTTP attempt via `fetch`'s own
+   * `signal` field, independent of whether retry is active. */
   async forFinal(fixtureId: number, options: FinalProofOptions = {}): Promise<ProofBundle> {
     const final = await this.data.awaitFinal(fixtureId, options.signal ? { signal: options.signal } : {});
-    const retry = mergeRetrySignal(options.retry, options.signal);
+    const retry = options.retry === undefined ? undefined : mergeRetrySignal(options.retry, options.signal);
     return this.fetch({
       fixtureId,
       seq: recordSeq(final),
       statKeys: options.statKeys ?? [1, 2],
       ...(retry === undefined ? {} : { retry }),
+      ...(options.signal ? { signal: options.signal } : {}),
     });
   }
 }

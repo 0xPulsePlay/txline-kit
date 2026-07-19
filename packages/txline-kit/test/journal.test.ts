@@ -86,6 +86,48 @@ describe("canonical journal", () => {
     expect(journal.conflicts[0]!.hashes).toHaveLength(2);
   });
 
+  test("orders conflicts by (source, sourceId), not sourceId alone, even when a score sourceId and an odds messageId collide as strings", async () => {
+    // Regression for the M3 review bug: conflicts were sorted by sourceId
+    // only. A score's sourceId ("fixtureId:paddedSeq") can string-collide
+    // with an odds record's free-form messageId; when it does, a
+    // sourceId-only comparator ties and the sort falls back to arrival
+    // order, so the resulting conflicts array (and any downstream hash
+    // derived from it, e.g. attestJournal's hashCanonical(journal)) could
+    // differ purely by which arrival order fed the records in.
+    const collidingId = "42:00000009";
+    const scoreA = await score(9);
+    const scoreB = await score(9, { StatusId: 4 });
+    const oddsA = await journalRecord("odds", normalizeOddsRecord({ FixtureId: 42, MessageId: collidingId, Ts: at + 1, Prices: [1.8, 3.9, 4.9] }));
+    const oddsB = await journalRecord("odds", normalizeOddsRecord({ FixtureId: 42, MessageId: collidingId, Ts: at + 1, Prices: [2.1, 3.5, 4.2] }));
+    expect(scoreA.sourceId).toBe(collidingId);
+    expect(oddsA.sourceId).toBe(collidingId);
+
+    const forward = await canonicalizeJournal([scoreA, scoreB, oddsA, oddsB]);
+    const reversed = await canonicalizeJournal([oddsB, oddsA, scoreB, scoreA]);
+    expect(forward.conflicts).toHaveLength(2);
+    expect(forward.conflicts.map((conflict) => conflict.source)).toEqual(["score", "odds"]);
+    expect(forward.conflicts).toEqual(reversed.conflicts);
+    await expect(hashCanonical(forward)).resolves.toBe(await hashCanonical(reversed));
+  });
+
+  test("journalRecord's stored payload is independent of later mutation of the caller's original object", async () => {
+    // Regression for the M6 review bug: Object.freeze({ ...payload, ... })
+    // only shallow-freezes the returned record; the referenced payload
+    // object itself was never cloned, so mutating the caller's original
+    // object after journaling silently changed the "frozen" record's
+    // exposed .payload while .payloadHash kept attesting to the
+    // pre-mutation bytes.
+    const original = normalizeScoreRecord({ FixtureId: 42, Seq: 11, Ts: at + 11, Action: "goal" });
+    const record = await journalRecord("score", original);
+    const payloadBefore = { ...record.payload };
+    (original as Record<string, unknown>).action = "tampered";
+    (original as Record<string, unknown>).fixtureId = 999;
+    expect(record.payload).toEqual(payloadBefore);
+    expect(record.payload).not.toBe(original);
+    expect((record.payload as Record<string, unknown>).action).not.toBe("tampered");
+    await expect(hashCanonical(record.payload)).resolves.toBe(record.payloadHash);
+  });
+
   test("buckets journal records into the official five-minute windows", async () => {
     const early = await score(1);
     const late = await journalRecord("score", normalizeScoreRecord({ FixtureId: 42, Seq: 9, Ts: at + 5 * 60_000, Action: "goal" }));

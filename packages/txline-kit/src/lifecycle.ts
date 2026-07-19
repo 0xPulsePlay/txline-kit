@@ -1,6 +1,6 @@
 import { VerificationError } from "./errors.js";
 import type { CanonicalJournal, JournalConflict } from "./journal.js";
-import { hashCanonical } from "./journal.js";
+import { canonicalStringify, hashCanonical } from "./journal.js";
 
 /** The four trust levels a proof-backed claim can honestly be at:
  * observed (live, one client's view), canonical (agreed content, proofs
@@ -55,26 +55,40 @@ function freeze<T>(attestation: ProofAttestation<T>): ProofAttestation<T> {
   return Object.freeze({ ...attestation, anchors: Object.freeze(attestation.anchors.map((anchor) => Object.freeze({ ...anchor }))) });
 }
 
+/** Deep-clone a subject via a canonical-JSON round-trip before it's stored
+ * on a frozen attestation. Object.freeze on the attestation container is
+ * shallow -- the referenced subject object itself is never cloned or
+ * deep-frozen by `freeze()` alone. Without this, a caller mutating the same
+ * object it passed in would make the "frozen" record's exposed `.subject`
+ * reflect the mutation while `.contentHash` still attested to the
+ * pre-mutation bytes. hashCanonical already requires the subject to be
+ * canonical-JSON-safe, so this round-trip is a safe, faithful clone. */
+function cloneSubject<T>(subject: T): T {
+  return JSON.parse(canonicalStringify(subject)) as T;
+}
+
 /** A live, single-client view: expressive, possibly incomplete or reordered. */
 export async function observeAttestation<T>(subject: T): Promise<ProofAttestation<T>> {
-  return freeze({ state: "observed", subject, contentHash: await hashCanonical(subject), coverage: "none", anchors: [] });
+  const contentHash = await hashCanonical(subject);
+  return freeze({ state: "observed", subject: cloneSubject(subject), contentHash, coverage: "none", anchors: [] });
 }
 
 /** Content everyone agrees on, proofs still pending. Conflicts quarantine
  * immediately — one source identity with diverging payloads must never seal. */
 export async function canonicalAttestation<T>(subject: T, conflicts: readonly JournalConflict[] = []): Promise<ProofAttestation<T>> {
   const contentHash = await hashCanonical(subject);
+  const clonedSubject = cloneSubject(subject);
   if (conflicts.length > 0) {
     return freeze({
       state: "quarantined",
-      subject,
+      subject: clonedSubject,
       contentHash,
       coverage: "none",
       anchors: [],
       quarantineReason: `Conflicting source records: ${conflicts.map((conflict) => conflict.sourceId).join(", ")}`,
     });
   }
-  return freeze({ state: "canonical", subject, contentHash, coverage: "none", anchors: [] });
+  return freeze({ state: "canonical", subject: clonedSubject, contentHash, coverage: "none", anchors: [] });
 }
 
 /** Canonicalize a journal into an attestation over its records, inheriting
