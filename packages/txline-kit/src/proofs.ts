@@ -273,14 +273,29 @@ export function normalizeOddsProof(rawValue: unknown, request: OddsProofOptions)
   });
 }
 
+/**
+ * Merge a top-level AbortSignal into a proof retry policy. The signal takes
+ * effect both between retry attempts (checked in waitForProofAvailability's
+ * loop and its backoff sleep) and for the in-flight HTTP request itself. A
+ * signal already present on an explicit retry policy wins over the
+ * top-level one, mirroring KeeperClient.prepare's merge precedence.
+ */
+function mergeRetrySignal(retry: ProofRetryPolicy | true | undefined, signal: AbortSignal | undefined): ProofRetryPolicy | true | undefined {
+  if (!signal) return retry;
+  if (retry === undefined) return { signal };
+  if (retry === true) return { signal };
+  return { signal, ...retry };
+}
+
 export class ProofClient {
   constructor(private readonly http: HttpPipeline, private readonly data: DataClient) {}
 
   async fetch(options: FetchProofOptions): Promise<ProofBundle> {
     requireRequest(options);
+    const retrySignal = options.retry && options.retry !== true ? options.retry.signal : undefined;
     const once = async (): Promise<ProofBundle> => {
       const query = new URLSearchParams({ fixtureId: String(options.fixtureId), seq: String(options.seq), statKeys: options.statKeys.join(",") });
-      const response = await this.http.request(`/scores/stat-validation?${query}`);
+      const response = await this.http.request(`/scores/stat-validation?${query}`, retrySignal ? { signal: retrySignal } : {});
       await this.http.expectOk(response, "score stat proof");
       let raw: unknown;
       try { raw = await response.json(); } catch (cause) {
@@ -298,9 +313,10 @@ export class ProofClient {
   async fetchOdds(options: OddsProofOptions): Promise<ExperimentalOddsProof> {
     if (typeof options.messageId !== "string" || options.messageId.length === 0) proofFailure("messageId must be a non-empty string", "ODDS_PROOF_MESSAGE_ID_INVALID", "Pass MessageId from a canonical odds record.");
     if (!Number.isSafeInteger(options.timestamp) || options.timestamp < 0) proofFailure("timestamp must be a non-negative integer in milliseconds", "ODDS_PROOF_TIMESTAMP_INVALID", "Pass the odds record's millisecond timestamp.");
+    const retrySignal = options.retry && options.retry !== true ? options.retry.signal : undefined;
     const once = async (): Promise<ExperimentalOddsProof> => {
       const query = new URLSearchParams({ messageId: options.messageId, timestamp: String(options.timestamp) });
-      const response = await this.http.request(`${options.path ?? DEFAULT_ODDS_PROOF_PATH}?${query}`);
+      const response = await this.http.request(`${options.path ?? DEFAULT_ODDS_PROOF_PATH}?${query}`, retrySignal ? { signal: retrySignal } : {});
       await this.http.expectOk(response, "odds proof");
       let raw: unknown;
       try { raw = await response.json(); } catch (cause) {
@@ -314,11 +330,12 @@ export class ProofClient {
 
   async forFinal(fixtureId: number, options: FinalProofOptions = {}): Promise<ProofBundle> {
     const final = await this.data.awaitFinal(fixtureId, options.signal ? { signal: options.signal } : {});
+    const retry = mergeRetrySignal(options.retry, options.signal);
     return this.fetch({
       fixtureId,
       seq: recordSeq(final),
       statKeys: options.statKeys ?? [1, 2],
-      ...(options.retry === undefined ? {} : { retry: options.retry }),
+      ...(retry === undefined ? {} : { retry }),
     });
   }
 }

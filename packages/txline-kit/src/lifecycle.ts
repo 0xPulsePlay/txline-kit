@@ -91,14 +91,46 @@ export function applyPartialProofs<T>(attestation: ProofAttestation<T>, anchors:
   return freeze({ ...attestation, coverage: anchors.length > 0 ? "partial" : attestation.coverage, anchors: [...attestation.anchors, ...anchors] });
 }
 
+function compareStrings(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 /** Seal canonical content with its complete anchor set. The sealed hash
  * covers (contentHash, proofFingerprint, anchors) — a separate commitment,
- * so sealing cannot mutate content and partial coverage stays representable. */
+ * so sealing cannot mutate content and partial coverage stays representable.
+ *
+ * Three things are checked/protected against at seal time:
+ *  - The subject's content is rehashed and compared to the contentHash
+ *    recorded at canonicalization time. Content is a mutable object owned
+ *    by the caller; if it changed between canonicalizeAttestation and
+ *    sealAttestation, sealing must refuse rather than commit to whichever
+ *    content happened to be there when this function ran.
+ *  - `anchors` is cloned and frozen immediately, before any sorting or
+ *    hashing, so every computation below (the sort, proofFingerprint,
+ *    sealedHash, and the anchors stored on the returned attestation) reads
+ *    the same immutable snapshot. Without this, a caller mutating one of
+ *    its own anchor objects while sealAttestation is awaiting a hash could
+ *    make the stored anchors and the sealedHash they're supposed to
+ *    attest to disagree.
+ *  - The sort has an explicit, fully deterministic tie-break chain
+ *    (sourceTimestamp, then sourceId, then rootHash) so two anchors tying
+ *    on the first key(s) still sort the same way regardless of the
+ *    caller's input order — Array#sort is stable, so an incomplete
+ *    comparator would otherwise let arrival order leak into sealedHash. */
 export async function sealAttestation<T>(attestation: ProofAttestation<T>, anchors: readonly ProofAnchor[]): Promise<ProofAttestation<T>> {
   if (attestation.state === "quarantined") lifecycleFailure(`Quarantined content must not seal (${attestation.quarantineReason ?? "unresolved conflict"})`, "LIFECYCLE_QUARANTINED", "Resolve the conflicting source records and re-canonicalize before sealing.");
   if (attestation.state !== "canonical") lifecycleFailure(`Cannot seal ${attestation.state} content`, "LIFECYCLE_TRANSITION_INVALID", "Seal only canonical content; observed views must be canonicalized first.");
   if (anchors.length === 0) lifecycleFailure("Sealing requires at least one proof anchor", "LIFECYCLE_ANCHORS_MISSING", "Pass the anchors whose roots this content verified against.");
-  const sorted = [...anchors].sort((a, b) => a.sourceTimestamp - b.sourceTimestamp || (a.sourceId < b.sourceId ? -1 : a.sourceId > b.sourceId ? 1 : 0));
+  const currentContentHash = await hashCanonical(attestation.subject);
+  if (currentContentHash !== attestation.contentHash) {
+    lifecycleFailure(
+      `Attestation content changed since canonicalization (expected ${attestation.contentHash}, subject now hashes to ${currentContentHash})`,
+      "LIFECYCLE_CONTENT_MUTATED",
+      "Re-canonicalize the current content and seal the resulting attestation; sealing must never commit to content that changed after it was canonicalized.",
+    );
+  }
+  const snapshot: readonly ProofAnchor[] = Object.freeze(anchors.map((anchor) => Object.freeze({ ...anchor })));
+  const sorted = [...snapshot].sort((a, b) => a.sourceTimestamp - b.sourceTimestamp || compareStrings(a.sourceId, b.sourceId) || compareStrings(a.rootHash, b.rootHash));
   const proofFingerprint = await hashCanonical(sorted.map((anchor) => anchor.rootHash));
   const sealedHash = await hashCanonical(["TXLINE_KIT_SEALED_V1", attestation.contentHash, proofFingerprint, sorted]);
   return freeze({ ...attestation, state: "verified", coverage: "complete", anchors: sorted, proofFingerprint, sealedHash });
