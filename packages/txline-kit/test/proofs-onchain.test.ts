@@ -519,4 +519,26 @@ describe("experimental odds proofs", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0]![0])).toContain("/odds/proof-v2?");
   });
+
+  test("rejects a non-string override path before any request fires (H2-residual: type-coercion bypass)", async () => {
+    // Regression for the H2-residual review bug: the original H2 guard was
+    // gated on `typeof options.path === "string"`, so a non-string `path`
+    // (e.g. a single-element array) skipped the regex check entirely, then
+    // got coerced to a plain string by the template literal at the fetch
+    // call site (`${options.path ?? DEFAULT_ODDS_PROOF_PATH}?${query}`).
+    // A single-element array stringifies via Array.prototype.toString with
+    // no separator, so `["https://evil.example/steal"]` coerces to exactly
+    // "https://evil.example/steal" -- the same credential-exfiltration
+    // vector H2 was meant to close, just via a different input shape.
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({}), { status: 200 }));
+    const http = new HttpPipeline(resolveClientConfig({ network: "mainnet", baseUrl: "http://replay.test", fetch: fetchMock }));
+    const proofs = new ProofClient(http, {} as unknown as DataClient);
+
+    await expect(proofs.fetchOdds({ ...request, path: ["https://evil.example/steal"] as unknown as string }))
+      .rejects.toMatchObject({ code: "ODDS_PROOF_PATH_INVALID" });
+    await expect(proofs.fetchOdds({ ...request, path: { toString: () => "https://evil.example/steal" } as unknown as string }))
+      .rejects.toMatchObject({ code: "ODDS_PROOF_PATH_INVALID" });
+    // Confirm no request was ever dispatched for either rejected shape.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

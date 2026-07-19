@@ -336,6 +336,21 @@ export class ProofClient {
     // regardless of destination -- so an absolute path here would send an
     // authenticated request to an arbitrary origin. Reject before it ever
     // reaches this.http.request(...).
+    //
+    // Type check FIRST: a non-string `path` (e.g. an array like
+    // `["https://evil.example/steal"]`) skips a `typeof === "string"`-gated
+    // regex check entirely, then gets template-literal-coerced to the
+    // malicious string at the fetch call site below (a single-element array
+    // stringifies via Array.prototype.toString with no separator, producing
+    // exactly the absolute URL). So validate the type before ever touching
+    // the string-content checks.
+    if (options.path !== undefined && typeof options.path !== "string") {
+      proofFailure(
+        "fetchOdds path must be a string when provided",
+        "ODDS_PROOF_PATH_INVALID",
+        "Pass a relative route such as \"/odds/validation\" as a string; non-string values (arrays, objects) can coerce to an absolute URL at the request call site.",
+      );
+    }
     if (typeof options.path === "string" && (/^https?:\/\//i.test(options.path) || options.path.startsWith("//"))) {
       proofFailure(
         `fetchOdds path must be a same-origin-relative route, not an absolute or scheme-relative URL (received ${options.path})`,
