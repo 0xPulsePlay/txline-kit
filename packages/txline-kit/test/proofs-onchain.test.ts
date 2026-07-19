@@ -6,7 +6,7 @@ import { resolveClientConfig } from "../src/core.js";
 import { DataClient } from "../src/data.js";
 import { HttpError, ProofError, VerificationError } from "../src/errors.js";
 import { HttpPipeline } from "../src/http.js";
-import { dailyScoresPda, merkleRootFromLeaf, OnchainClient, verifyMerklePath } from "../src/onchain.js";
+import { dailyScoresPda, deriveRootPda, healTimestampMillis, merkleRootFromLeaf, OnchainClient, verifyMerklePath } from "../src/onchain.js";
 import { decodeBytes32, isProofPending, normalizeProofBundle, ProofClient, waitForProofAvailability } from "../src/proofs.js";
 
 const bytes = (seed: number) => Array.from({ length: 32 }, (_, index) => (seed + index) % 256);
@@ -327,5 +327,110 @@ describe("proof availability retry", () => {
     });
     expect(bundle.fixtureId).toBe(18_241_006);
     expect(retryFetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("root PDA namespaces and timestamp healing", () => {
+  const programId = new PublicKey("9ExbZjAapQww1vfcisDmrngPinHTEfpjYRWMunJgcKaA");
+  const millis = 1_783_828_320_792;
+  const seconds = Math.floor(millis / 1_000);
+  const expected = (namespace: string, day: number) => PublicKey.findProgramAddressSync([
+    Buffer.from(namespace),
+    Buffer.from([day & 0xff, day >>> 8]),
+  ], programId)[0].toBase58();
+
+  test("derives every namespace, applying the ten-day fixture bucketing rule", () => {
+    const day = Math.floor(millis / 86_400_000);
+    expect(deriveRootPda({ namespace: "daily_scores_roots", timestamp: millis, programId }).toBase58()).toBe(expected("daily_scores_roots", day));
+    expect(deriveRootPda({ namespace: "daily_batch_roots", timestamp: millis, programId }).toBase58()).toBe(expected("daily_batch_roots", day));
+    expect(deriveRootPda({ namespace: "ten_daily_fixtures_roots", timestamp: millis, programId }).toBase58()).toBe(expected("ten_daily_fixtures_roots", Math.floor(day / 10) * 10));
+    expect(deriveRootPda({ namespace: "daily_scores_roots", timestamp: millis, programId }).toBase58()).toBe(dailyScoresPda(millis, programId).toBase58());
+  });
+
+  test("heals seconds-unit timestamps to the same account as milliseconds", () => {
+    expect(healTimestampMillis(seconds)).toBe(seconds * 1_000);
+    expect(healTimestampMillis(millis)).toBe(millis);
+    expect(healTimestampMillis(new Date(millis))).toBe(millis);
+    expect(deriveRootPda({ namespace: "daily_scores_roots", timestamp: seconds, programId }).toBase58()).toBe(dailyScoresPda(millis, programId).toBase58());
+  });
+
+  test("dailyScoresPda({ strict: true }) rejects seconds-unit inputs that would otherwise derive a wrong PDA silently", () => {
+    expect(() => dailyScoresPda(seconds, programId, { strict: true })).toThrow(expect.objectContaining({ code: "PDA_TIMESTAMP_UNIT_SUSPECT" }));
+    expect(() => dailyScoresPda(-1, programId)).toThrow(expect.objectContaining({ code: "PDA_TIMESTAMP_INVALID" }));
+    expect(dailyScoresPda(0, programId).toBase58()).toBe(expected("daily_scores_roots", 0));
+  });
+
+  test("dailyScoresPda defaults to strict:false, reproducing v0.1.0's silent seconds-unit behavior byte-for-byte", () => {
+    // v0.1.0 had no unit check at all: it took the raw number as-is and
+    // derived whatever (wrong, but non-throwing) PDA that implied. The
+    // default here (options omitted, and options.strict omitted) must
+    // reproduce that exact result so existing v0.1.0 callers upgrading with
+    // no code changes get the identical PDA they got before.
+    const wrongDay = Math.floor(seconds / 86_400_000);
+    const wrongExpected = expected("daily_scores_roots", wrongDay);
+    expect(() => dailyScoresPda(seconds, programId)).not.toThrow();
+    expect(dailyScoresPda(seconds, programId).toBase58()).toBe(wrongExpected);
+    expect(dailyScoresPda(seconds, programId, {}).toBase58()).toBe(wrongExpected);
+    expect(dailyScoresPda(seconds, programId, { strict: false }).toBase58()).toBe(wrongExpected);
+  });
+
+  test("guards namespace names and u16 seed overflow", () => {
+    expect(() => deriveRootPda({ namespace: "daily_odds_roots" as never, timestamp: millis, programId })).toThrow(expect.objectContaining({ code: "PDA_NAMESPACE_INVALID" }));
+    expect(() => deriveRootPda({ namespace: "daily_scores_roots", timestamp: 65_536 * 86_400_000, programId })).toThrow(expect.objectContaining({ code: "PDA_EPOCH_OVERFLOW" }));
+    expect(() => healTimestampMillis(Number.NaN)).toThrow(expect.objectContaining({ code: "PDA_TIMESTAMP_INVALID" }));
+  });
+
+  describe("Date inputs are unambiguous and bypass the seconds heuristic", () => {
+    // A value under SECONDS_SUSPECT_BOUND (100_000_000_000, ~March 1973) that
+    // is nonetheless a legitimate millisecond timestamp: e.g. a synthetic
+    // fixture clock, or any real epoch time before 1973. Passed as a raw
+    // number it is ambiguous and the existing heuristic is expected to heal
+    // it (multiply by 1000). Passed as a `Date`, the unit is certain — the
+    // caller got it from `.getTime()` or `Date.now()` — and healing it would
+    // silently corrupt an otherwise-correct timestamp.
+    const smallMillis = 50_000_000_000; // 1971-08-02T... well under the bound
+
+    test("healTimestampMillis uses a Date's getTime() exactly, never reinterpreting it as seconds", () => {
+      expect(healTimestampMillis(new Date(smallMillis))).toBe(smallMillis);
+      // The identical numeric value, passed as a raw number, is ambiguous and
+      // is still healed the old way — proving the fix is Date-specific, not
+      // a change to the heuristic bound itself.
+      expect(healTimestampMillis(smallMillis)).toBe(smallMillis * 1_000);
+    });
+
+    test("healTimestampMillis honors an explicit unit override for raw numbers, bypassing the heuristic", () => {
+      expect(healTimestampMillis(smallMillis, "ms")).toBe(smallMillis);
+      expect(healTimestampMillis(seconds, "s")).toBe(seconds * 1_000);
+    });
+
+    test("the heuristic still fires correctly for raw-number seconds vs milliseconds from external data", () => {
+      // Large-but-valid seconds timestamp near the bound (100_000_000_000):
+      // still ambiguous as a raw number, still healed.
+      const nearBoundSeconds = 99_999_999; // *1_000 = 99_999_999_000, just under the bound
+      expect(healTimestampMillis(nearBoundSeconds)).toBe(nearBoundSeconds * 1_000);
+      // Comfortably-milliseconds raw number (current, real epoch time): left
+      // untouched.
+      expect(healTimestampMillis(millis)).toBe(millis);
+    });
+
+    test("dailyScoresPda derives directly from a Date's getTime(), never throwing PDA_TIMESTAMP_UNIT_SUSPECT even under strict:true", () => {
+      const epochDay = Math.floor(smallMillis / 86_400_000);
+      expect(dailyScoresPda(new Date(smallMillis), programId).toBase58()).toBe(expected("daily_scores_roots", epochDay));
+      expect(dailyScoresPda(new Date(smallMillis), programId, { strict: true }).toBase58()).toBe(expected("daily_scores_roots", epochDay));
+      // The same value as a raw number remains ambiguous and, under
+      // strict:true, still throws — proving dailyScoresPda's Date handling,
+      // not its safety check, changed.
+      expect(() => dailyScoresPda(smallMillis, programId, { strict: true })).toThrow(expect.objectContaining({ code: "PDA_TIMESTAMP_UNIT_SUSPECT" }));
+      // Without strict, the raw number is silently healed the old way.
+      expect(() => dailyScoresPda(smallMillis, programId)).not.toThrow();
+    });
+
+    test("deriveRootPda accepts a Date and an explicit timestampUnit override without misclassifying small values", () => {
+      const epochDay = Math.floor(smallMillis / 86_400_000);
+      expect(deriveRootPda({ namespace: "daily_scores_roots", timestamp: new Date(smallMillis), programId }).toBase58())
+        .toBe(expected("daily_scores_roots", epochDay));
+      expect(deriveRootPda({ namespace: "daily_scores_roots", timestamp: smallMillis, timestampUnit: "ms", programId }).toBase58())
+        .toBe(expected("daily_scores_roots", epochDay));
+    });
   });
 });
