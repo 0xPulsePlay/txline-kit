@@ -114,14 +114,22 @@ export async function journalRecord<T extends CanonicalScoreRecord | CanonicalOd
     if (typeof messageId !== "string" || messageId.length === 0) journalFailure("Odds journal records need a messageId", "JOURNAL_SOURCE_ID_MISSING", "Journal odds records that include MessageId.");
     sourceId = messageId;
   }
+  const payloadHash = await hashCanonical(payload);
+  // Deep-clone the payload via a canonical-JSON round-trip before freezing:
+  // Object.freeze only shallow-freezes this record, so a caller who mutates
+  // the original `payload` object after journaling would otherwise make the
+  // "frozen" record's exposed `.payload` reflect the mutation while
+  // `.payloadHash` still attests to the pre-mutation bytes. Cloning makes
+  // the stored reference independent of the caller's original object.
+  const clonedPayload = JSON.parse(canonicalStringify(payload)) as T;
   return Object.freeze({
     source,
     fixtureId: fixtureId!,
     sourceId,
     sourceTimestamp: timestamp!,
     receivedTimestamp: receivedTimestamp ?? timestamp!,
-    payloadHash: await hashCanonical(payload),
-    payload,
+    payloadHash,
+    payload: clonedPayload,
   });
 }
 
@@ -177,7 +185,16 @@ export async function canonicalizeJournal<T extends CanonicalScoreRecord | Canon
       const [source, sourceId] = identity.split("\u0000") as [JournalSource, string];
       return Object.freeze({ source, sourceId, hashes: Object.freeze([...hashes].sort()) });
     })
-    .sort((a, b) => (a.sourceId < b.sourceId ? -1 : a.sourceId > b.sourceId ? 1 : 0));
+    // Sort by (source, sourceId), not sourceId alone: a score record's
+    // sourceId (`fixtureId:paddedSeq`) can string-collide with an odds
+    // record's free-form messageId, and a sourceId-only comparator would
+    // tie on that collision and fall back to arrival order -- violating
+    // the documented "same records in any arrival order -> same journal"
+    // guarantee, since downstream hashing includes `.conflicts`.
+    .sort((a, b) => {
+      if (a.source !== b.source) return a.source === "score" ? -1 : 1;
+      return a.sourceId < b.sourceId ? -1 : a.sourceId > b.sourceId ? 1 : 0;
+    });
   const canonical = [...exact.values()].sort(compareRecords);
   const headHash = await chainHash(canonical.map((record) => [record.source, record.sourceId, String(record.sourceTimestamp), record.payloadHash]));
   return Object.freeze({ records: Object.freeze(canonical), conflicts: Object.freeze(conflicts), headHash });
