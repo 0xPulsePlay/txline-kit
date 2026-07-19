@@ -227,10 +227,17 @@ export async function waitForProofAvailability<T>(fetchProof: () => Promise<T>, 
       return await fetchProof();
     } catch (error) {
       if (!isProofPending(error)) throw error;
-      if (now() - started >= timeout) {
+      const elapsed = now() - started;
+      if (elapsed >= timeout) {
         proofFailure(`Proof remained unavailable for ${timeout}ms`, "PROOF_AVAILABILITY_TIMEOUT", "TxLINE anchors roots shortly after each five-minute interval closes; extend timeoutMs or retry once the daily root is anchored.", error);
       }
-      await sleep(delay, policy.signal);
+      // Cap the sleep to the remaining budget so wall-clock time never
+      // overshoots the advertised timeoutMs by a full backoff interval --
+      // previously the deadline was only checked BEFORE sleeping, then the
+      // full computed `delay` always elapsed regardless of how close to the
+      // deadline it was.
+      const remainingBudget = timeout - elapsed;
+      await sleep(Math.min(delay, remainingBudget), policy.signal);
       delay = Math.min(maximum, Math.ceil(delay * multiplier));
     }
   }
