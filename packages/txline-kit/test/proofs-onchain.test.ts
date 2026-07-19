@@ -219,6 +219,32 @@ describe("proof availability retry", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  test("sleepUnlessAborted (via waitForProofAvailability's default sleep) removes its abort listener once the timer resolves normally", async () => {
+    // Regression for the wi-1 review bug: the abort listener registered per
+    // retry sleep was never removed on the normal-resolve path, so a
+    // long-lived/reused AbortSignal accumulated one stale listener per
+    // completed sleep. addEventListener/removeEventListener calls on the
+    // signal must stay balanced across multiple sleep cycles that all
+    // complete normally (no abort fired).
+    const controller = new AbortController();
+    const addSpy = vi.spyOn(controller.signal, "addEventListener");
+    const removeSpy = vi.spyOn(controller.signal, "removeEventListener");
+    const fetchProof = vi.fn()
+      .mockRejectedValueOnce(pending(404))
+      .mockRejectedValueOnce(pending(409))
+      .mockRejectedValueOnce(pending(425))
+      .mockResolvedValueOnce("bundle");
+    await expect(waitForProofAvailability(fetchProof, {
+      signal: controller.signal,
+      initialDelayMs: 1,
+      maximumDelayMs: 2,
+      timeoutMs: 60_000,
+    })).resolves.toBe("bundle");
+    expect(addSpy).toHaveBeenCalledTimes(3);
+    expect(removeSpy).toHaveBeenCalledTimes(3);
+    expect(controller.signal.aborted).toBe(false);
+  });
+
   test("ProofClient.forFinal aborts the proof-availability wait promptly instead of exhausting the retry budget", async () => {
     // Regression for the wi-1 review bug: forFinal only threaded its top-level
     // AbortSignal into data.awaitFinal, never into the retry policy handed to
@@ -242,6 +268,46 @@ describe("proof availability retry", () => {
     // Only the initial attempt (if any) should have fired before the abort
     // short-circuited the backoff wait; it must not have retried repeatedly.
     expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(1);
+  });
+
+  test("ProofClient.forFinal({signal}) alone keeps the fail-fast single-attempt default; retry stays opt-in", async () => {
+    // Regression for the wi-1 review bug: mergeRetrySignal returned a
+    // truthy {signal} retry-policy shape whenever ANY signal was passed to
+    // forFinal, even without an explicit `retry`, silently flipping the
+    // documented single-attempt fail-fast default into a bounded
+    // multi-minute retry wait.
+    const fetchMock = vi.fn(async () => new Response("not anchored", { status: 404 }));
+    const http = new HttpPipeline(resolveClientConfig({ network: "mainnet", baseUrl: "http://replay.test", fetch: fetchMock }));
+    const data = { awaitFinal: vi.fn(async () => ({ seq: 400 })) } as unknown as DataClient;
+    const proofs = new ProofClient(http, data);
+    const controller = new AbortController();
+    await expect(proofs.forFinal(18_241_006, { signal: controller.signal })).rejects.toMatchObject({ status: 404 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // The same signal still cancels that single in-flight attempt.
+    const hangingFetch = vi.fn((_url: string | URL | Request, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      if (init?.signal?.aborted) { reject(init.signal.reason); return; }
+      init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true });
+    }));
+    const hangingHttp = new HttpPipeline(resolveClientConfig({ network: "mainnet", baseUrl: "http://replay.test", fetch: hangingFetch }));
+    const hangingProofs = new ProofClient(hangingHttp, data);
+    const abortController = new AbortController();
+    const hanging = hangingProofs.forFinal(18_241_006, { signal: abortController.signal });
+    queueMicrotask(() => abortController.abort(new Error("caller stop")));
+    await expect(hanging).rejects.toThrow("caller stop");
+
+    // With an explicit retry policy alongside the signal, retry activates.
+    const retryFetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response("not anchored", { status: 404 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(rawProof([1, 2])), { status: 200 }));
+    const retryHttp = new HttpPipeline(resolveClientConfig({ network: "mainnet", baseUrl: "http://replay.test", fetch: retryFetchMock }));
+    const retryProofs = new ProofClient(retryHttp, data);
+    const bundle = await retryProofs.forFinal(18_241_006, {
+      signal: new AbortController().signal,
+      retry: { initialDelayMs: 1, maximumDelayMs: 2, timeoutMs: 60_000 },
+    });
+    expect(bundle.fixtureId).toBe(18_241_006);
+    expect(retryFetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
