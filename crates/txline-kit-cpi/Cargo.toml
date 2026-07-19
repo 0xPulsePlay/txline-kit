@@ -5,6 +5,7 @@ description = "Typed, return-safe Anchor CPI helpers for the TxLINE oracle"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 rust-version.workspace = true
 readme = "README.md"
 keywords = ["solana", "anchor", "oracle", "cpi", "txline"]
