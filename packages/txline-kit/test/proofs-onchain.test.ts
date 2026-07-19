@@ -6,7 +6,7 @@ import { resolveClientConfig } from "../src/core.js";
 import { DataClient } from "../src/data.js";
 import { HttpError, ProofError, VerificationError } from "../src/errors.js";
 import { HttpPipeline } from "../src/http.js";
-import { dailyScoresPda, deriveRootPda, healTimestampMillis, merkleRootFromLeaf, OnchainClient, verifyMerklePath } from "../src/onchain.js";
+import { dailyScoresPda, deriveRootPda, healTimestampMillis, merkleRootFromLeaf, OnchainClient, oddsBatchRootPda, verifyMerklePath } from "../src/onchain.js";
 import { decodeBytes32, isProofPending, normalizeProofBundle, ProofClient, waitForProofAvailability } from "../src/proofs.js";
 
 const bytes = (seed: number) => Array.from({ length: 32 }, (_, index) => (seed + index) % 256);
@@ -254,5 +254,54 @@ describe("root PDA namespaces and timestamp healing", () => {
     expect(() => deriveRootPda({ namespace: "daily_odds_roots" as never, timestamp: millis, programId })).toThrow(expect.objectContaining({ code: "PDA_NAMESPACE_INVALID" }));
     expect(() => deriveRootPda({ namespace: "daily_scores_roots", timestamp: 65_536 * 86_400_000, programId })).toThrow(expect.objectContaining({ code: "PDA_EPOCH_OVERFLOW" }));
     expect(() => healTimestampMillis(Number.NaN)).toThrow(expect.objectContaining({ code: "PDA_TIMESTAMP_INVALID" }));
+  });
+});
+
+describe("experimental odds proofs", () => {
+  const request = { messageId: "m-77", timestamp: 1_783_828_320_792 };
+
+  test("fetches through the configurable path, decoding known fields and preserving raw", async () => {
+    const payload = {
+      oddsSubTreeProof: [node(11, false)],
+      mainTreeProof: [{ hash: Buffer.from(bytes(12)).toString("base64"), isRightSibling: true }],
+      batchRoot: `0x${Buffer.from(bytes(13)).toString("hex")}`,
+      vendorField: "kept",
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), { status: 200 }));
+    const http = new HttpPipeline(resolveClientConfig({ network: "mainnet", baseUrl: "http://replay.test", fetch: fetchMock }));
+    const proofs = new ProofClient(http, {} as unknown as DataClient);
+    const proof = await proofs.fetchOdds(request);
+    expect(proof.oddsSubTreeProof).toEqual([{ hash: bytes(11), isRightSibling: false }]);
+    expect(proof.mainTreeProof).toEqual([{ hash: bytes(12), isRightSibling: true }]);
+    expect(proof.batchRoot).toEqual(bytes(13));
+    expect(proof.raw.vendorField).toBe("kept");
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("/odds/validation?messageId=m-77");
+
+    await proofs.fetchOdds({ ...request, path: "/odds/proof-v2" });
+    expect(String(fetchMock.mock.calls[1]![0])).toContain("/odds/proof-v2?");
+  });
+
+  test("stays permissive about unknown shapes but rejects non-objects and bad inputs", async () => {
+    const http = new HttpPipeline(resolveClientConfig({ network: "mainnet", baseUrl: "http://replay.test", fetch: vi.fn(async () => new Response(JSON.stringify({ unexpected: true }), { status: 200 })) }));
+    const proofs = new ProofClient(http, {} as unknown as DataClient);
+    const proof = await proofs.fetchOdds(request);
+    expect(proof).toMatchObject({ messageId: "m-77", raw: { unexpected: true } });
+    expect(proof.batchRoot).toBeUndefined();
+    const bad = new ProofClient(new HttpPipeline(resolveClientConfig({ network: "mainnet", baseUrl: "http://replay.test", fetch: vi.fn(async () => new Response("[]", { status: 200 })) })), {} as unknown as DataClient);
+    await expect(bad.fetchOdds(request)).rejects.toMatchObject({ code: "ODDS_PROOF_RESPONSE_INVALID" });
+    await expect(bad.fetchOdds({ ...request, messageId: "" })).rejects.toMatchObject({ code: "ODDS_PROOF_MESSAGE_ID_INVALID" });
+    await expect(bad.fetchOdds({ ...request, timestamp: 1.5 })).rejects.toMatchObject({ code: "ODDS_PROOF_TIMESTAMP_INVALID" });
+  });
+
+  test("rides the availability retry and derives the odds batch root account", async () => {
+    const responses = [new Response("pending", { status: 425 }), new Response(JSON.stringify({}), { status: 200 })];
+    const fetchMock = vi.fn(async () => responses.shift()!);
+    const http = new HttpPipeline(resolveClientConfig({ network: "mainnet", baseUrl: "http://replay.test", fetch: fetchMock }));
+    const proofs = new ProofClient(http, {} as unknown as DataClient);
+    await proofs.fetchOdds({ ...request, retry: { initialDelayMs: 1, timeoutMs: 60_000 } });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const programId = new PublicKey("9ExbZjAapQww1vfcisDmrngPinHTEfpjYRWMunJgcKaA");
+    expect(oddsBatchRootPda(request.timestamp, programId).toBase58())
+      .toBe(deriveRootPda({ namespace: "daily_batch_roots", timestamp: request.timestamp, programId }).toBase58());
   });
 });

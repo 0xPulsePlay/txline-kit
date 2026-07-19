@@ -50,6 +50,13 @@ export function deriveRootPda(input: { namespace: RootNamespace; timestamp: numb
   return PublicKey.findProgramAddressSync([encoder.encode(input.namespace), u16DaySeed(bucket)], input.programId)[0];
 }
 
+/** Root account for odds-batch proofs (`daily_batch_roots`), the counterpart
+ * of `dailyScoresPda` for the experimental odds proof surface. Accepts
+ * milliseconds or seconds (healed via `healTimestampMillis`). */
+export function oddsBatchRootPda(timestamp: number | Date, programId: PublicKey): PublicKey {
+  return deriveRootPda({ namespace: "daily_batch_roots", timestamp, programId });
+}
+
 export function dailyScoresPda(timestamp: number | Date, programId: PublicKey): PublicKey {
   const millis = timestamp instanceof Date ? timestamp.getTime() : timestamp;
   if (!Number.isSafeInteger(millis) || millis < 0) verificationFailure("Daily score PDA timestamp must be a non-negative integer in milliseconds", "PDA_TIMESTAMP_INVALID", "Use bundle.summary.updateStats.minTimestamp without converting it to seconds.");
