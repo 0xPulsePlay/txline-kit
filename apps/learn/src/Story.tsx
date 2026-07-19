@@ -106,7 +106,7 @@ function ArchitectureDiagram() {
   const active = modules.find((module) => module.name === selected)!;
   return (
     <div className="story-arch">
-      <img className="story-arch__bg" src="/story/architecture.jpg" alt="" aria-hidden="true" loading="lazy" />
+      <img className="story-arch__bg" src="/story/architecture-v2.jpg" alt="" aria-hidden="true" loading="lazy" />
       <div className="story-arch__row">
         <div className="story-arch__node story-arch__node--feed"><span>TxLINE</span><strong>Raw feed</strong></div>
         <svg className="story-arch__line" viewBox="0 0 100 4" preserveAspectRatio="none" aria-hidden="true">
@@ -167,7 +167,7 @@ export function Story() {
       </header>
 
       <section className="story-hero">
-        <img className="story-hero__img" src="/story/header.jpg" alt="Abstract schematic of a live match feed converging into an anchored Merkle proof" />
+        <img className="story-hero__img" src="/story/header-v2.jpg" alt="Abstract schematic of a live match feed converging into an anchored Merkle proof" />
         <div className="story-hero__copy">
           <Eyebrow>Hackathon submission · 3-minute read</Eyebrow>
           <h1>A live World Cup feed, turned into a Solana settlement you can inspect.</h1>
@@ -225,7 +225,7 @@ export function Story() {
           </p>
         </div>
         <div className="story-live-grid">
-          <img className="story-live__img" src="/story/live-match.jpg" alt="Abstract schematic pitch with pulsing event nodes along a match-clock arc" loading="lazy" />
+          <img className="story-live__img" src="/story/live-match-v2.jpg" alt="Abstract schematic pitch with pulsing event nodes along a match-clock arc" loading="lazy" />
           <div className="story-scoreline">
             <div><small>{captureMeta.home}</small><strong>Home</strong></div>
             <b>{captureMeta.scoreline}</b>
@@ -262,7 +262,7 @@ export function Story() {
 
       <section className="story-section story-production-wrap">
         <div className="story-section-head"><Eyebrow>Used in production</Eyebrow><h2>Not a demo claim — a real deleted file.</h2></div>
-        <img className="story-production__img" src="/story/production.jpg" alt="Abstract diptych of tangled lines resolving into one clean anchored node" loading="lazy" />
+        <img className="story-production__img" src="/story/production-v2.jpg" alt="Abstract diptych of tangled lines resolving into one clean anchored node" loading="lazy" />
         <Production />
       </section>
 
