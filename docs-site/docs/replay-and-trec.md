@@ -20,11 +20,17 @@ redistribution is explicitly authorized.
 
 ## The CLI
 
+`txline-replay` is `packages/txline-kit`'s `bin` (`dist/cli.js` after
+`pnpm build`). npm publication is deferred, so it is **not** on PATH just
+from cloning and building — run it with `node` from the repo root (or via
+`pnpm exec txline-replay` from a project that depends on the package, which
+gets it into that project's own `node_modules/.bin`):
+
 ```sh
-txline-replay validate match.trec       # header, sha256, record/channel counts
-txline-replay inspect match.trec
-txline-replay serve match.trec --port 38770 --speed 10 --pause-on goal
-txline-replay serve match.trec --port 38770 --deterministic   # CI mode
+node packages/txline-kit/dist/cli.js validate match.trec       # header, sha256, record/channel counts
+node packages/txline-kit/dist/cli.js inspect match.trec
+node packages/txline-kit/dist/cli.js serve match.trec --port 38770 --speed 10 --pause-on goal
+node packages/txline-kit/dist/cli.js serve match.trec --port 38770 --deterministic   # CI mode
 ```
 
 The replay host implements guest/activation stubs, fixture coverage, score
@@ -36,5 +42,12 @@ play, pause, seek, speed, and pause-on-event.
 
 - Zero credentials, wallets, or purchases — anyone can reproduce your flow.
 - `--deterministic` makes CI runs exactly reproducible.
-- Replayed proofs are the *recorded genuine responses*, so verification code
-  paths run for real. Simulated in time only; the evidence is real.
+- Replayed proofs are *synthetic recorded fixtures*: byte-identical to a real
+  proof response, so `proofs.fetch`/`normalizeProofBundle` and the rest of
+  the decoding path run unmodified against them. That is not the same as
+  live proof: `onchain.verifyView` is a Solana simulation and needs a real
+  RPC connection and funded fee payer whether the `ProofBundle` it's given
+  came from replay or from a live fetch — replay cannot produce on-chain
+  verification evidence on its own. Treat replay as proving the integration
+  loop up through decoding a proof bundle, and verify against a live network
+  separately before relying on `verifyView`.

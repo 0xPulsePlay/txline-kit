@@ -26,10 +26,13 @@ typed errors will refuse most mixes, but don't make it try.
 
 ## Develop replay-first
 
-Before touching credentials, run against a bundled synthetic recording:
+Before touching credentials, run against a bundled synthetic recording.
+`txline-replay` is this package's `bin` field (`packages/txline-kit/dist/cli.js`);
+npm publication is deferred, so nothing puts it on PATH automatically — run
+the built file with `node` from the repo root:
 
 ```sh
-txline-replay serve fixtures/synthetic/match-42.trec --port 38770 --deterministic
+node packages/txline-kit/dist/cli.js serve fixtures/synthetic/match-42.trec --port 38770 --deterministic
 ```
 
 Point the unchanged client at `baseUrl: "http://127.0.0.1:38770"` and build

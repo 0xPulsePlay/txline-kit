@@ -54,10 +54,17 @@ string before debugging anything else.
 ## 3. Replay first — prove the loop with zero credentials
 
 Stand up the replay server on a committed synthetic recording and point the
-unchanged client at it:
+unchanged client at it. npm publication is deferred, so `txline-replay` (the
+package's `bin`, `packages/txline-kit/dist/cli.js` after `pnpm build`) is not
+on PATH by default. If your project depends on it as a workspace/file
+dependency (step 1), `pnpm exec txline-replay ...` resolves it from your own
+`node_modules/.bin`; otherwise run the built file directly with `node`,
+pointing at wherever the txline-kit checkout lives:
 
 ```sh
-txline-replay serve fixtures/synthetic/match-42.trec --port <port> --deterministic
+pnpm exec txline-replay serve fixtures/synthetic/match-42.trec --port <port> --deterministic
+# or, with no dependency wired up yet:
+node <path-to-txline-kit-checkout>/packages/txline-kit/dist/cli.js serve fixtures/synthetic/match-42.trec --port <port> --deterministic
 ```
 
 ```ts
@@ -102,6 +109,11 @@ const proof = await txline.proofs.fetch({ fixtureId, seq, statKeys: market.statK
 const valid = await txline.onchain.verifyView(proof, market.strategy);
 ```
 
+Score-stat proofs are not the only route: `txline.proofs.fetchOdds({ messageId,
+timestamp })` opens the odds-checkpoint path (EXPERIMENTAL — the wire shape
+isn't yet validated against live `daily_batch_roots` accounts, so decoding is
+permissive).
+
 Rules that prevent real bugs:
 - Proof roots anchor on a delay — always pass `retry` (or accept the keeper's
   default wait) instead of treating early 404s as failure.
@@ -111,6 +123,12 @@ Rules that prevent real bugs:
 - Timestamps are milliseconds; PDA helpers reject or heal seconds inputs.
 - Use `/lifecycle` states (`observed → canonical → verified`, quarantine on
   conflict) as the vocabulary for what the app may claim at each stage.
+- `verifyView` is a **live** read-only Solana simulation: it needs a real RPC
+  connection and a funded fee payer. Replay reproduces the TxLINE HTTP/SSE
+  API only, not a Solana network — a proof bundle fetched from a replay
+  server decodes and normalizes identically to a live one, but calling
+  `verifyView` on it still requires pointing the client at an actual
+  cluster. Replay cannot substitute for a live on-chain verification pass.
 
 ## 7. Settlement (optional)
 
@@ -129,8 +147,12 @@ unaudited demo programs.
 
 - [ ] Replay smoke: server on a synthetic `.trec`, project consumes the
       stream to `game_finalised`, deterministically in CI.
-- [ ] One proof round-trip: fetch (with retry) → `verifyView` returns true on
-      the replayed fixture's bundled proof.
+- [ ] One proof round-trip against replay: fetch (with retry) decodes a
+      `ProofBundle` from the replayed fixture's bundled proof response.
+      `verifyView` is a live on-chain simulation — it needs a real Solana RPC
+      connection and a funded fee payer and cannot be exercised against
+      replay alone, so verify it once against a live network (devnet or
+      mainnet) before declaring the proof path integrated.
 - [ ] Error handling: at least the typed codes for auth, proof availability
       timeout, and strategy coverage are surfaced, not swallowed.
 - [ ] No credentials in the repo; live config comes from the environment.

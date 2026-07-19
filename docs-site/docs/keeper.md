@@ -1,9 +1,11 @@
 # Keeper
 
 The keeper composes the full settlement pipeline: watch a fixture, wait for
-strict finalisation, fetch the ordered proof (waiting out slow root
-anchoring), verify read-only, build the validation instruction, and hand it
-to consumer-owned submission code.
+*settlement* finalisation (`isSettlementFinalisation` — `game_finalised` +
+`StatusId 100`, accepting the provider's real-world period-omitted variant,
+not only the narrower `isStrictFinalisation`'s exact `Period 100`), fetch the
+ordered proof (waiting out slow root anchoring), verify read-only, build the
+validation instruction, and hand it to consumer-owned submission code.
 
 ```ts
 // Dry run: stops after read-only proof verification. Always do this first.
@@ -27,4 +29,12 @@ Contracts worth knowing:
 - Submission retries are bounded (1–10, default 3) with confirmation checking
   on by default. Keep `submit` idempotent: an RPC timeout can hide a
   successful prior send.
-- Every step honors your `AbortSignal`.
+- Your `AbortSignal` is honored at the points that wait: the finalisation
+  wait, the proof-availability retry loop (fixed as of this release — abort
+  now interrupts an in-flight retry backoff instead of only taking effect
+  between attempts), the per-attempt check before each submission, and the
+  backoff between submission retries. It does **not** interrupt an
+  already-in-flight on-chain simulation (`verifyView`/`buildValidateIx`),
+  `connection.confirmTransaction`, or your own `submit` callback once
+  called — those must check the signal themselves if they need to be
+  interruptible mid-flight.

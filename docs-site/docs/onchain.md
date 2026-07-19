@@ -8,9 +8,14 @@ const valid = await txline.onchain.verifyView(bundle, market.strategy);
 
 `verifyView` simulates TxLINE's `validate_stat_v2` — a read-only Solana
 simulation that needs an existing fee-payer account but submits nothing and
-spends nothing. `buildValidateIx` returns the real validation instruction,
-its daily-root account, and the 1.4M-CU pre-instruction for composition into
-your settlement transaction.
+spends nothing. That simulation runs against a **live** Solana cluster over a
+real RPC connection; it is not something replay can produce. A `ProofBundle`
+fetched from a `.trec` replay server decodes identically to a live one, but
+calling `verifyView` on it still requires pointing the client at an actual
+network — see [Replay & .trec](replay-and-trec.md#why-replay-first).
+`buildValidateIx` returns the real validation instruction, its daily-root
+account, and the 1.4M-CU pre-instruction for composition into your
+settlement transaction.
 
 ## PDA rules — the millisecond trap
 

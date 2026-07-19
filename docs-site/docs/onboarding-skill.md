@@ -15,8 +15,11 @@ eight steps:
 4. **Map the domain** onto the kit's subpath exports — data-only, proofs,
    settlement — importing only what the project needs.
 5. **Auth for live** (wallet subscription flow, credential-store choice).
-6. **Proof + verification path**: fetch → availability retry → `verifyView`;
-   use lifecycle states as the vocabulary for what the app may claim.
+6. **Proof + verification path**: fetch → availability retry → `verifyView`
+   (score-stat proofs), or `fetchOdds` for the experimental odds-checkpoint
+   route; use lifecycle states as the vocabulary for what the app may claim.
+   `verifyView` is a live Solana simulation — it needs a real RPC connection
+   and cannot run against replay alone.
 7. **Settlement (optional)**: keeper wiring, dry-run first, idempotent
    submit.
 8. **Verification checklist** before declaring onboarding done: replay smoke
