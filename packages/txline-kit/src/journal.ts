@@ -132,6 +132,28 @@ function compareRecords(left: JournalRecord, right: JournalRecord): number {
   return left.payloadHash < right.payloadHash ? -1 : left.payloadHash > right.payloadHash ? 1 : 0;
 }
 
+/** Deterministically pick a survivor between two records that collide on the
+ * exact same (source, sourceId, payloadHash) key -- true exact duplicates,
+ * since an identical payloadHash means an identical canonical payload (and
+ * therefore an identical sourceTimestamp, derived from the payload). The
+ * only field that can legitimately differ between them is receivedTimestamp
+ * (the same content journaled more than once, e.g. redelivered by the
+ * source). This comparison is symmetric -- preferRecord(a, b) always returns
+ * the same winner regardless of which side is `current` vs `candidate` --
+ * so the survivor never depends on which one the input array happened to
+ * list first. */
+function preferRecord<T extends CanonicalScoreRecord | CanonicalOddsRecord>(current: JournalRecord<T>, candidate: JournalRecord<T>): JournalRecord<T> {
+  if (candidate.receivedTimestamp !== current.receivedTimestamp) {
+    return candidate.receivedTimestamp < current.receivedTimestamp ? candidate : current;
+  }
+  // Fully tied, including receivedTimestamp: fall back to a stable,
+  // content-derived secondary key (the payload's own canonical JSON) so the
+  // pick stays deterministic even here, rather than "whichever came last".
+  const currentKey = canonicalStringify(current.payload);
+  const candidateKey = canonicalStringify(candidate.payload);
+  return candidateKey < currentKey ? candidate : current;
+}
+
 /** Dedupe exact duplicates, order deterministically (ignoring arrival), list
  * conflicting payloads observed under one source identity, and chain a head
  * hash over the result. Same records in any arrival order → same journal. */
@@ -142,7 +164,9 @@ export async function canonicalizeJournal<T extends CanonicalScoreRecord | Canon
   const byIdentity = new Map<string, Set<string>>();
   for (const record of records) {
     const identity = `${record.source}\u0000${record.sourceId}`;
-    exact.set(`${identity}\u0000${record.payloadHash}`, record);
+    const key = `${identity}\u0000${record.payloadHash}`;
+    const existing = exact.get(key);
+    exact.set(key, existing === undefined ? record : preferRecord(existing, record));
     const set = byIdentity.get(identity) ?? new Set<string>();
     set.add(record.payloadHash);
     byIdentity.set(identity, set);
