@@ -162,6 +162,7 @@ export function Story() {
         <Link className="story-brand" to="/" aria-label="TxLINE Kit home"><SparkMark /><strong>TxLINE</strong><span>kit</span></Link>
         <nav>
           <Link to="/">Open the app ↗</Link>
+          <Link to="/feedback">API feedback ↗</Link>
           <a href="https://github.com/0xPulsePlay/txline-kit" target="_blank" rel="noreferrer">GitHub ↗</a>
         </nav>
       </header>

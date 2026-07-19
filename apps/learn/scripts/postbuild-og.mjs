@@ -1,16 +1,17 @@
-// Stamps a /story-specific HTML shell so social crawlers hitting
-// https://txline-kit.claude.do/story get distinct Open Graph / Twitter Card
-// tags instead of the homepage's. The app is a client-side-routed SPA (one
-// JS/CSS bundle for both "/" and "/story"), so this script clones the built
-// dist/index.html into dist/story/index.html and swaps only the <head> meta
-// that differs -- title/description/og:*/twitter:* -- leaving every asset
-// reference (script/link tags, which use content-hashed absolute paths like
-// /assets/index-xxxx.js) untouched and shared between both files.
+// Stamps route-specific HTML shells so social crawlers (and curl) hitting
+// https://txline-kit.claude.do/story or /feedback get distinct Open Graph /
+// Twitter Card tags instead of the homepage's. The app is a client-side-
+// routed SPA (one JS/CSS bundle for every route), so this script clones the
+// built dist/index.html into dist/<route>/index.html and swaps only the
+// <head> meta that differs -- title/description/og:*/twitter:* -- leaving
+// every asset reference (script/link tags, which use content-hashed
+// absolute paths like /assets/index-xxxx.js) untouched and shared across
+// every shell.
 //
 // ops/static-server.mjs resolves a request for a directory to that
-// directory's index.html (see resolveFile()), so a bare GET /story is served
-// dist/story/index.html directly -- confirmed by curl against the deployed
-// release, not just assumed.
+// directory's index.html (see resolveFile()), so a bare GET /story or
+// /feedback is served that route's dist/<route>/index.html directly --
+// confirmed by curl against the deployed release, not just assumed.
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,7 +26,21 @@ if (!existsSync(indexPath)) {
 
 const home = readFileSync(indexPath, "utf8");
 
-const replacements = [
+function stampRoute(route, replacements) {
+  let stamped = home;
+  for (const [from, to] of replacements) {
+    if (!stamped.includes(from)) {
+      throw new Error(`postbuild-og: expected marker not found in dist/index.html: ${from}`);
+    }
+    stamped = stamped.replace(from, to);
+  }
+  const routeDir = join(distDir, route);
+  mkdirSync(routeDir, { recursive: true });
+  writeFileSync(join(routeDir, "index.html"), stamped);
+  console.log(`postbuild-og: wrote dist/${route}/index.html with ${route}-specific OG/Twitter meta`);
+}
+
+stampRoute("story", [
   [
     "<title>TxLINE Kit · Proofs you can inspect</title>",
     "<title>TxLINE Kit · The Story</title>",
@@ -58,17 +73,33 @@ const replacements = [
     '<meta name="twitter:image" content="https://txline-kit.claude.do/og/home.jpg" />',
     '<meta name="twitter:image" content="https://txline-kit.claude.do/og/story.jpg" />',
   ],
-];
+]);
 
-let story = home;
-for (const [from, to] of replacements) {
-  if (!story.includes(from)) {
-    throw new Error(`postbuild-og: expected marker not found in dist/index.html: ${from}`);
-  }
-  story = story.replace(from, to);
-}
-
-const storyDir = join(distDir, "story");
-mkdirSync(storyDir, { recursive: true });
-writeFileSync(join(storyDir, "index.html"), story);
-console.log("postbuild-og: wrote dist/story/index.html with story-specific OG/Twitter meta");
+stampRoute("feedback", [
+  [
+    "<title>TxLINE Kit · Proofs you can inspect</title>",
+    "<title>TxLINE Kit · API feedback</title>",
+  ],
+  [
+    '<meta property="og:url" content="https://txline-kit.claude.do/" />',
+    '<meta property="og:url" content="https://txline-kit.claude.do/feedback" />',
+  ],
+  [
+    '<meta property="og:title" content="TxLINE Kit · Proofs you can inspect" />',
+    '<meta property="og:title" content="TxLINE / TxODDS API feedback, from building this SDK." />',
+  ],
+  [
+    '<meta property="og:description" content="TxLINE Kit turns live sports data into deterministic replay, typed predicates, inspectable Merkle receipts, and proof-settled Solana transactions." />',
+    '<meta property="og:description" content="GameState lags reality, StatusId + Clock is the real live signal, SuperOddsType blends market periods silently -- six integration gotchas we hit building txline-kit, and why an SDK should absorb them." />',
+  ],
+  // Reuses the existing homepage OG image -- no dedicated /feedback image
+  // asset exists yet, and inventing one is out of scope for this page.
+  [
+    '<meta name="twitter:title" content="TxLINE Kit · Proofs you can inspect" />',
+    '<meta name="twitter:title" content="TxLINE / TxODDS API feedback, from building this SDK." />',
+  ],
+  [
+    '<meta name="twitter:description" content="TxLINE Kit turns live sports data into deterministic replay, typed predicates, inspectable Merkle receipts, and proof-settled Solana transactions." />',
+    '<meta name="twitter:description" content="GameState lags reality, StatusId + Clock is the real live signal, SuperOddsType blends market periods silently -- six integration gotchas we hit building txline-kit, and why an SDK should absorb them." />',
+  ],
+]);

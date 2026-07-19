@@ -225,7 +225,7 @@ export function App() {
   }, [screen]);
   return <div className="app-shell">
     <a className="skip-link" href="#content">Skip to content</a>
-    <header className="topbar"><button className="brand" onClick={() => navigate("overview")} aria-label="TxLINE Kit home"><SparkMark /><strong>TxLINE</strong><span>kit</span></button><div className="network"><i /> {copy.networkBadge}</div><div className="topbar-links"><Link to="/story">The story ↗</Link><a href="https://github.com/0xPulsePlay/txline-kit" target="_blank" rel="noreferrer">GitHub ↗</a></div></header>
+    <header className="topbar"><button className="brand" onClick={() => navigate("overview")} aria-label="TxLINE Kit home"><SparkMark /><strong>TxLINE</strong><span>kit</span></button><div className="network"><i /> {copy.networkBadge}</div><div className="topbar-links"><Link to="/story">The story ↗</Link><Link to="/feedback">API feedback ↗</Link><a href="https://github.com/0xPulsePlay/txline-kit" target="_blank" rel="noreferrer">GitHub ↗</a></div></header>
     <div className="body-grid">
       <nav className="side-nav" aria-label="Learning screens">{screens.map((item) => <button key={item.id} aria-current={screen === item.id ? "page" : undefined} className={screen === item.id ? "active" : ""} onClick={() => navigate(item.id)}><span>{item.index}</span><strong>{item.label}</strong></button>)}</nav>
       <main id="content">{screen === "overview" ? <Overview navigate={navigate} /> : screen === "replay" ? <ReplayLab /> : screen === "strategy" ? <StrategyStudio /> : screen === "proof" ? <ProofAnatomy /> : screen === "settlement" ? <SettlementReceipt /> : screen === "modules" ? <ModuleMap /> : <Production />}</main>
