@@ -471,4 +471,33 @@ describe("experimental odds proofs", () => {
     expect(oddsBatchRootPda(request.timestamp, programId).toBase58())
       .toBe(deriveRootPda({ namespace: "daily_batch_roots", timestamp: request.timestamp, programId }).toBase58());
   });
+
+  test("rejects an absolute or scheme-relative override path before any request fires (H2: credential exfiltration guard)", async () => {
+    // Regression for the H2 review bug: fetchOdds({ path }) is a public
+    // "route-drift override" field passed straight into
+    // this.http.request(...) with default auth: true. HttpPipeline.apiUrl
+    // passes any path matching /^https?:\/\// through UNCHANGED (no
+    // same-origin check), and the request pipeline attaches the live JWT +
+    // X-Api-Token headers regardless of destination -- so a caller-supplied
+    // absolute URL in `path` would get the authenticated request sent to
+    // that arbitrary origin. fetchOdds must reject before ever touching
+    // this.http.request.
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({}), { status: 200 }));
+    const http = new HttpPipeline(resolveClientConfig({ network: "mainnet", baseUrl: "http://replay.test", fetch: fetchMock }));
+    const proofs = new ProofClient(http, {} as unknown as DataClient);
+
+    await expect(proofs.fetchOdds({ ...request, path: "https://evil.example/steal" }))
+      .rejects.toMatchObject({ code: "ODDS_PROOF_PATH_INVALID" });
+    await expect(proofs.fetchOdds({ ...request, path: "HTTP://evil.example/steal" }))
+      .rejects.toMatchObject({ code: "ODDS_PROOF_PATH_INVALID" });
+    await expect(proofs.fetchOdds({ ...request, path: "//evil.example/steal" }))
+      .rejects.toMatchObject({ code: "ODDS_PROOF_PATH_INVALID" });
+    // Confirm no request was ever dispatched for any of the rejected paths.
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // A normal relative path still works.
+    await expect(proofs.fetchOdds({ ...request, path: "/odds/proof-v2" })).resolves.toMatchObject({ messageId: request.messageId });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("/odds/proof-v2?");
+  });
 });

@@ -322,6 +322,20 @@ export class ProofClient {
   async fetchOdds(options: OddsProofOptions): Promise<ExperimentalOddsProof> {
     if (typeof options.messageId !== "string" || options.messageId.length === 0) proofFailure("messageId must be a non-empty string", "ODDS_PROOF_MESSAGE_ID_INVALID", "Pass MessageId from a canonical odds record.");
     if (!Number.isSafeInteger(options.timestamp) || options.timestamp < 0) proofFailure("timestamp must be a non-negative integer in milliseconds", "ODDS_PROOF_TIMESTAMP_INVALID", "Pass the odds record's millisecond timestamp.");
+    // `path` is a same-origin-relative route-drift override, not a fetch
+    // destination. HttpPipeline.apiUrl passes through any absolute
+    // (http(s)://) or scheme-relative (//host/...) path UNCHANGED and the
+    // request pipeline still attaches the live JWT + X-Api-Token headers
+    // regardless of destination -- so an absolute path here would send an
+    // authenticated request to an arbitrary origin. Reject before it ever
+    // reaches this.http.request(...).
+    if (typeof options.path === "string" && (/^https?:\/\//i.test(options.path) || options.path.startsWith("//"))) {
+      proofFailure(
+        `fetchOdds path must be a same-origin-relative route, not an absolute or scheme-relative URL (received ${options.path})`,
+        "ODDS_PROOF_PATH_INVALID",
+        "Pass a relative route such as \"/odds/validation\"; absolute or scheme-relative paths would send the authenticated request to an arbitrary origin.",
+      );
+    }
     const retrySignal = options.retry && options.retry !== true ? options.retry.signal : undefined;
     const once = async (): Promise<ExperimentalOddsProof> => {
       const query = new URLSearchParams({ messageId: options.messageId, timestamp: String(options.timestamp) });
