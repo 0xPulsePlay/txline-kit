@@ -6,7 +6,7 @@ import { resolveClientConfig } from "../src/core.js";
 import { DataClient } from "../src/data.js";
 import { HttpError, ProofError, VerificationError } from "../src/errors.js";
 import { HttpPipeline } from "../src/http.js";
-import { dailyScoresPda, merkleRootFromLeaf, OnchainClient, verifyMerklePath } from "../src/onchain.js";
+import { dailyScoresPda, deriveRootPda, healTimestampMillis, merkleRootFromLeaf, OnchainClient, verifyMerklePath } from "../src/onchain.js";
 import { decodeBytes32, isProofPending, normalizeProofBundle, ProofClient, waitForProofAvailability } from "../src/proofs.js";
 
 const bytes = (seed: number) => Array.from({ length: 32 }, (_, index) => (seed + index) % 256);
@@ -217,5 +217,42 @@ describe("proof availability retry", () => {
     const proofs = new ProofClient(http, {} as unknown as DataClient);
     await expect(proofs.fetch({ fixtureId: 1, seq: 1, statKeys: [1] })).rejects.toMatchObject({ status: 404 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("root PDA namespaces and timestamp healing", () => {
+  const programId = new PublicKey("9ExbZjAapQww1vfcisDmrngPinHTEfpjYRWMunJgcKaA");
+  const millis = 1_783_828_320_792;
+  const seconds = Math.floor(millis / 1_000);
+  const expected = (namespace: string, day: number) => PublicKey.findProgramAddressSync([
+    Buffer.from(namespace),
+    Buffer.from([day & 0xff, day >>> 8]),
+  ], programId)[0].toBase58();
+
+  test("derives every namespace, applying the ten-day fixture bucketing rule", () => {
+    const day = Math.floor(millis / 86_400_000);
+    expect(deriveRootPda({ namespace: "daily_scores_roots", timestamp: millis, programId }).toBase58()).toBe(expected("daily_scores_roots", day));
+    expect(deriveRootPda({ namespace: "daily_batch_roots", timestamp: millis, programId }).toBase58()).toBe(expected("daily_batch_roots", day));
+    expect(deriveRootPda({ namespace: "ten_daily_fixtures_roots", timestamp: millis, programId }).toBase58()).toBe(expected("ten_daily_fixtures_roots", Math.floor(day / 10) * 10));
+    expect(deriveRootPda({ namespace: "daily_scores_roots", timestamp: millis, programId }).toBase58()).toBe(dailyScoresPda(millis, programId).toBase58());
+  });
+
+  test("heals seconds-unit timestamps to the same account as milliseconds", () => {
+    expect(healTimestampMillis(seconds)).toBe(seconds * 1_000);
+    expect(healTimestampMillis(millis)).toBe(millis);
+    expect(healTimestampMillis(new Date(millis))).toBe(millis);
+    expect(deriveRootPda({ namespace: "daily_scores_roots", timestamp: seconds, programId }).toBase58()).toBe(dailyScoresPda(millis, programId).toBase58());
+  });
+
+  test("dailyScoresPda rejects seconds-unit inputs that previously derived a wrong PDA silently", () => {
+    expect(() => dailyScoresPda(seconds, programId)).toThrow(expect.objectContaining({ code: "PDA_TIMESTAMP_UNIT_SUSPECT" }));
+    expect(() => dailyScoresPda(-1, programId)).toThrow(expect.objectContaining({ code: "PDA_TIMESTAMP_INVALID" }));
+    expect(dailyScoresPda(0, programId).toBase58()).toBe(expected("daily_scores_roots", 0));
+  });
+
+  test("guards namespace names and u16 seed overflow", () => {
+    expect(() => deriveRootPda({ namespace: "daily_odds_roots" as never, timestamp: millis, programId })).toThrow(expect.objectContaining({ code: "PDA_NAMESPACE_INVALID" }));
+    expect(() => deriveRootPda({ namespace: "daily_scores_roots", timestamp: 65_536 * 86_400_000, programId })).toThrow(expect.objectContaining({ code: "PDA_EPOCH_OVERFLOW" }));
+    expect(() => healTimestampMillis(Number.NaN)).toThrow(expect.objectContaining({ code: "PDA_TIMESTAMP_INVALID" }));
   });
 });

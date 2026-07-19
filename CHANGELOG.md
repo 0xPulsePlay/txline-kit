@@ -2,6 +2,7 @@
 
 ## Unreleased (0.2.0)
 
+- Add namespace-generic `deriveRootPda` (`daily_scores_roots`, `daily_batch_roots`, `ten_daily_fixtures_roots` with ten-day bucketing) and `healTimestampMillis`. `dailyScoresPda` now rejects seconds-unit timestamps with `PDA_TIMESTAMP_UNIT_SUSPECT` instead of silently deriving a wrong account.
 - Add `waitForProofAvailability` with bounded exponential backoff on HTTP 404/409/425, plus opt-in `retry` on `ProofClient.fetch`/`forFinal`. **Behavior change:** `keeper.prepare` now waits (bounded, 3 minutes by default) for the daily root to anchor instead of failing on the first 404; pass `proofRetry: false` for the previous single-attempt behavior.
 
 ## 0.1.0 source release — 2026-07-18

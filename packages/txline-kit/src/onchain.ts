@@ -12,13 +12,52 @@ function verificationFailure(message: string, code: string, fix: string, cause?:
   throw new VerificationError(message, { code, fix, cause });
 }
 
+/** TxLINE root-account namespaces. Scores anchor per day, odds batches anchor
+ * per day, and fixture roots anchor in ten-day buckets. */
+export type RootNamespace = "daily_scores_roots" | "daily_batch_roots" | "ten_daily_fixtures_roots";
+
+const ROOT_NAMESPACES: readonly RootNamespace[] = ["daily_scores_roots", "daily_batch_roots", "ten_daily_fixtures_roots"];
+
+const DAY_MILLIS = 86_400_000;
+
+/** Millisecond values below this bound (≈ March 1973) cannot be real TxLINE
+ * timestamps, but every plausible seconds-unit timestamp falls under it. */
+const SECONDS_SUSPECT_BOUND = 100_000_000_000;
+
+/** Normalize a timestamp to milliseconds, healing seconds-unit inputs.
+ * TxLINE responses mix seconds and milliseconds across endpoints; a seconds
+ * value fed into a day calculation silently derives a wrong but valid-looking
+ * PDA, so the ambiguity is resolved here in one place. */
+export function healTimestampMillis(timestamp: number | Date): number {
+  const value = timestamp instanceof Date ? timestamp.getTime() : timestamp;
+  if (!Number.isSafeInteger(value) || value < 0) verificationFailure("Timestamp must be a non-negative integer in milliseconds or seconds", "PDA_TIMESTAMP_INVALID", "Pass an epoch timestamp such as bundle.summary.updateStats.minTimestamp.");
+  return value > 0 && value < SECONDS_SUSPECT_BOUND ? value * 1_000 : value;
+}
+
+function u16DaySeed(day: number): Uint8Array {
+  if (day > 65_535) verificationFailure(`Epoch day ${day} does not fit the program's u16 seed`, "PDA_EPOCH_OVERFLOW", "Confirm the timestamp is an epoch time compatible with the deployed program.");
+  return Uint8Array.of(day & 0xff, (day >>> 8) & 0xff);
+}
+
+/** Derive a TxLINE root account for any namespace. Accepts milliseconds or
+ * seconds (healed), and applies the ten-day bucketing rule for fixture roots. */
+export function deriveRootPda(input: { namespace: RootNamespace; timestamp: number | Date; programId: PublicKey }): PublicKey {
+  if (!ROOT_NAMESPACES.includes(input.namespace)) {
+    verificationFailure(`Unknown root namespace ${String(input.namespace)}`, "PDA_NAMESPACE_INVALID", `Use one of: ${ROOT_NAMESPACES.join(", ")}.`);
+  }
+  const day = Math.floor(healTimestampMillis(input.timestamp) / DAY_MILLIS);
+  const bucket = input.namespace === "ten_daily_fixtures_roots" ? Math.floor(day / 10) * 10 : day;
+  return PublicKey.findProgramAddressSync([encoder.encode(input.namespace), u16DaySeed(bucket)], input.programId)[0];
+}
+
 export function dailyScoresPda(timestamp: number | Date, programId: PublicKey): PublicKey {
   const millis = timestamp instanceof Date ? timestamp.getTime() : timestamp;
   if (!Number.isSafeInteger(millis) || millis < 0) verificationFailure("Daily score PDA timestamp must be a non-negative integer in milliseconds", "PDA_TIMESTAMP_INVALID", "Use bundle.summary.updateStats.minTimestamp without converting it to seconds.");
-  const epochDay = Math.floor(millis / 86_400_000);
-  if (epochDay > 65_535) verificationFailure(`Epoch day ${epochDay} does not fit the program's u16 seed`, "PDA_EPOCH_OVERFLOW", "Confirm the timestamp is milliseconds and compatible with the deployed program.");
-  const day = Uint8Array.of(epochDay & 0xff, (epochDay >>> 8) & 0xff);
-  return PublicKey.findProgramAddressSync([encoder.encode("daily_scores_roots"), day], programId)[0];
+  if (millis > 0 && millis < SECONDS_SUSPECT_BOUND) {
+    verificationFailure(`Timestamp ${millis} appears to be in seconds; a wrong PDA would be derived`, "PDA_TIMESTAMP_UNIT_SUSPECT", "Pass milliseconds (bundle.summary.updateStats.minTimestamp is already milliseconds), or use deriveRootPda, which heals seconds inputs.");
+  }
+  const epochDay = Math.floor(millis / DAY_MILLIS);
+  return PublicKey.findProgramAddressSync([encoder.encode("daily_scores_roots"), u16DaySeed(epochDay)], programId)[0];
 }
 
 async function sha256(parts: readonly Uint8Array[]): Promise<Bytes32> {
