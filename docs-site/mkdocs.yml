@@ -1,0 +1,39 @@
+site_name: TxLINE Kit
+site_description: Typed TxLINE data, deterministic replay, Merkle-proof verification, and Solana CPI settlement.
+site_url: https://docs.txline-kit.claude.do
+repo_url: https://github.com/0xPulsePlay/txline-kit
+repo_name: 0xPulsePlay/txline-kit
+docs_dir: docs
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: teal
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: teal
+  features:
+    - content.code.copy
+    - navigation.sections
+    - navigation.footer
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - tables
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Authentication: auth.md
+  - Data & normalization: data.md
+  - Proofs: proofs.md
+  - On-chain: onchain.md
+  - Strategy & markets: strategy-markets.md
+  - Keeper: keeper.md
+  - Replay & .trec: replay-and-trec.md
+  - Rust CPI crate: cpi-crate.md
+  - Onboarding skill: onboarding-skill.md
+  - Safety boundary: safety-boundary.md

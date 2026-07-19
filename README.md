@@ -2,7 +2,7 @@
 
 Safe TypeScript, replay, and Solana CPI tooling for TxLINE.
 
-Version 0.1.0 is the proof-gated initial release. Explore the public learning app at [txline-kit.claude.do](https://txline-kit.claude.do).
+Version 0.1.0 is the proof-gated initial release. Explore the public learning app at [txline-kit.claude.do](https://txline-kit.claude.do). The documentation site sources live in [`docs-site/`](docs-site/), and AI agents onboarding a project onto the SDK should follow [`skills/txline-kit-onboarding/SKILL.md`](skills/txline-kit-onboarding/SKILL.md).
 
 Phase 1 adds the production client foundation: pinned network configuration, wallet activation, credential renewal, typed failures, score and odds normalization, five-minute bucket helpers, resilient SSE streams, and ESM/CommonJS package outputs.
 

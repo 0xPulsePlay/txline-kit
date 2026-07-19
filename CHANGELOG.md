@@ -2,6 +2,7 @@
 
 ## Unreleased (0.2.0)
 
+- Add the documentation site sources (`docs-site/`, mkdocs-material, agent-first homepage) and the repo-shipped `txline-kit-onboarding` agent skill.
 - Add the EXPERIMENTAL odds proof surface — `ProofClient.fetchOdds` with a route-drift-configurable path, permissive `ExperimentalOddsProof` decoding that always preserves the raw response, availability retry support, and `oddsBatchRootPda` (`daily_batch_roots`). Unvalidated against live batch roots; marked experimental until it is.
 - Add the proof lifecycle (`@0xpulseplay/txline-kit/lifecycle`) — `ProofAttestation` with `observed | canonical | verified | quarantined` states (material aliases liquid/amber/crystal), a pre-proof content hash that sealing never recomputes, a separate sealed hash over (content, proof fingerprint, anchors), representable partial coverage, and quarantine wired to journal conflicts.
 - Add the canonical journal (`@0xpulseplay/txline-kit/journal`) — deterministic record identities, exact-duplicate dedupe, arrival-order-independent canonical ordering with a chained head hash, conflict detection for diverging payloads under one identity, five-minute bucketing aligned to `updateBucket`, and witness-vs-canonical `ReconciliationReport`s.
