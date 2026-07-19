@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased (0.2.0)
+
+- Add `waitForProofAvailability` with bounded exponential backoff on HTTP 404/409/425, plus opt-in `retry` on `ProofClient.fetch`/`forFinal`. **Behavior change:** `keeper.prepare` now waits (bounded, 3 minutes by default) for the daily root to anchor instead of failing on the first 404; pass `proofRetry: false` for the previous single-attempt behavior.
+
 ## 0.1.0 source release — 2026-07-18
 
 - Add typed TxLINE client, authentication, normalized data, and resilient SSE streams.

@@ -2,7 +2,7 @@ import BN from "bn.js";
 import { z } from "zod";
 import type { CanonicalScoreRecord } from "./data.js";
 import { DataClient } from "./data.js";
-import { ProofError } from "./errors.js";
+import { HttpError, ProofError } from "./errors.js";
 import { HttpPipeline } from "./http.js";
 
 export type Bytes32 = readonly number[];
@@ -39,11 +39,23 @@ export interface FetchProofOptions {
   fixtureId: number;
   seq: number;
   statKeys: readonly number[];
+  retry?: ProofRetryPolicy | true;
 }
 
 export interface FinalProofOptions {
   statKeys?: readonly number[];
   signal?: AbortSignal;
+  retry?: ProofRetryPolicy | true;
+}
+
+export interface ProofRetryPolicy {
+  initialDelayMs?: number;
+  maximumDelayMs?: number;
+  multiplier?: number;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  now?: () => number;
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 }
 
 const rawRecord = z.record(z.string(), z.unknown());
@@ -164,23 +176,84 @@ function recordSeq(record: CanonicalScoreRecord): number {
   return record.seq!;
 }
 
+const PENDING_PROOF_STATUSES = new Set([404, 409, 425]);
+
+export function isProofPending(error: unknown): boolean {
+  return error instanceof HttpError && error.status !== undefined && PENDING_PROOF_STATUSES.has(error.status);
+}
+
+function sleepUnlessAborted(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const timer = setTimeout(() => resolve(), ms);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    }, { once: true });
+  });
+}
+
+function retryNumber(value: number | undefined, fallback: number, name: string, minimum: number): number {
+  const result = value ?? fallback;
+  if (!Number.isFinite(result) || result < minimum) {
+    proofFailure(`${name} must be a number of at least ${minimum}`, "PROOF_RETRY_POLICY_INVALID", "Use positive backoff bounds; omit fields to accept the defaults.");
+  }
+  return result;
+}
+
+export async function waitForProofAvailability<T>(fetchProof: () => Promise<T>, policy: ProofRetryPolicy = {}): Promise<T> {
+  const initial = retryNumber(policy.initialDelayMs, 750, "initialDelayMs", 1);
+  const maximum = retryNumber(policy.maximumDelayMs, 8_000, "maximumDelayMs", initial);
+  const multiplier = retryNumber(policy.multiplier, 1.7, "multiplier", 1);
+  const timeout = retryNumber(policy.timeoutMs, 360_000, "timeoutMs", 1);
+  const now = policy.now ?? Date.now;
+  const sleep = policy.sleep ?? sleepUnlessAborted;
+  const started = now();
+  let delay = initial;
+  for (;;) {
+    policy.signal?.throwIfAborted();
+    try {
+      return await fetchProof();
+    } catch (error) {
+      if (!isProofPending(error)) throw error;
+      if (now() - started >= timeout) {
+        proofFailure(`Proof remained unavailable for ${timeout}ms`, "PROOF_AVAILABILITY_TIMEOUT", "TxLINE anchors roots shortly after each five-minute interval closes; extend timeoutMs or retry once the daily root is anchored.", error);
+      }
+      await sleep(delay, policy.signal);
+      delay = Math.min(maximum, Math.ceil(delay * multiplier));
+    }
+  }
+}
+
 export class ProofClient {
   constructor(private readonly http: HttpPipeline, private readonly data: DataClient) {}
 
   async fetch(options: FetchProofOptions): Promise<ProofBundle> {
     requireRequest(options);
-    const query = new URLSearchParams({ fixtureId: String(options.fixtureId), seq: String(options.seq), statKeys: options.statKeys.join(",") });
-    const response = await this.http.request(`/scores/stat-validation?${query}`);
-    await this.http.expectOk(response, "score stat proof");
-    let raw: unknown;
-    try { raw = await response.json(); } catch (cause) {
-      proofFailure("Score proof endpoint did not return valid JSON", "PROOF_JSON_INVALID", "Inspect provider availability and the selected replay or network host.", cause);
-    }
-    return normalizeProofBundle(raw, options);
+    const once = async (): Promise<ProofBundle> => {
+      const query = new URLSearchParams({ fixtureId: String(options.fixtureId), seq: String(options.seq), statKeys: options.statKeys.join(",") });
+      const response = await this.http.request(`/scores/stat-validation?${query}`);
+      await this.http.expectOk(response, "score stat proof");
+      let raw: unknown;
+      try { raw = await response.json(); } catch (cause) {
+        proofFailure("Score proof endpoint did not return valid JSON", "PROOF_JSON_INVALID", "Inspect provider availability and the selected replay or network host.", cause);
+      }
+      return normalizeProofBundle(raw, options);
+    };
+    if (options.retry === undefined) return once();
+    return waitForProofAvailability(once, options.retry === true ? {} : options.retry);
   }
 
   async forFinal(fixtureId: number, options: FinalProofOptions = {}): Promise<ProofBundle> {
     const final = await this.data.awaitFinal(fixtureId, options.signal ? { signal: options.signal } : {});
-    return this.fetch({ fixtureId, seq: recordSeq(final), statKeys: options.statKeys ?? [1, 2] });
+    return this.fetch({
+      fixtureId,
+      seq: recordSeq(final),
+      statKeys: options.statKeys ?? [1, 2],
+      ...(options.retry === undefined ? {} : { retry: options.retry }),
+    });
   }
 }

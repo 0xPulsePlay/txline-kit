@@ -35,10 +35,28 @@ describe("keeper preparation", () => {
     const prepared = await keeper.prepare({ fixtureId, market });
     expect(prepared).toMatchObject({ fixtureId, market, proof, validation, valid: true });
     expect(data.awaitFinal).toHaveBeenCalledWith(fixtureId, {});
-    expect(proofs.fetch).toHaveBeenCalledWith({ fixtureId, seq: 7, statKeys: [1, 2] });
+    expect(proofs.fetch).toHaveBeenCalledWith({ fixtureId, seq: 7, statKeys: [1, 2], retry: { timeoutMs: 180_000 } });
     expect(onchain.verifyView).toHaveBeenCalledWith(proof, market.strategy);
     expect(onchain.buildValidateIx).toHaveBeenCalledWith(proof, market.strategy);
     expect(Object.isFrozen(prepared)).toBe(true);
+  });
+
+  test("waits for slow root anchoring by default and lets callers tune or disable the wait", async () => {
+    const bounded = harness();
+    const market = markets.finalResult(fixtureId).awayWin();
+    await bounded.keeper.prepare({ fixtureId, market });
+    expect(bounded.proofs.fetch).toHaveBeenCalledWith(expect.objectContaining({ retry: { timeoutMs: 180_000 } }));
+
+    const tuned = harness();
+    const controller = new AbortController();
+    await tuned.keeper.prepare({ fixtureId, market, signal: controller.signal, proofRetry: { timeoutMs: 30_000, initialDelayMs: 250 } });
+    expect(tuned.proofs.fetch).toHaveBeenCalledWith(expect.objectContaining({
+      retry: { timeoutMs: 30_000, initialDelayMs: 250, signal: controller.signal },
+    }));
+
+    const disabled = harness();
+    await disabled.keeper.prepare({ fixtureId, market, proofRetry: false });
+    expect(disabled.proofs.fetch).toHaveBeenCalledWith({ fixtureId, seq: 7, statKeys: [1, 2] });
   });
 
   test("refuses mismatched fixtures, missing sequences, false predicates, and aborted work", async () => {

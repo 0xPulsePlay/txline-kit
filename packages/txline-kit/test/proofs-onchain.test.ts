@@ -4,10 +4,10 @@ import { describe, expect, test, vi } from "vitest";
 import { createTxLineClient } from "../src/client.js";
 import { resolveClientConfig } from "../src/core.js";
 import { DataClient } from "../src/data.js";
-import { ProofError, VerificationError } from "../src/errors.js";
+import { HttpError, ProofError, VerificationError } from "../src/errors.js";
 import { HttpPipeline } from "../src/http.js";
 import { dailyScoresPda, merkleRootFromLeaf, OnchainClient, verifyMerklePath } from "../src/onchain.js";
-import { decodeBytes32, normalizeProofBundle, ProofClient } from "../src/proofs.js";
+import { decodeBytes32, isProofPending, normalizeProofBundle, ProofClient, waitForProofAvailability } from "../src/proofs.js";
 
 const bytes = (seed: number) => Array.from({ length: 32 }, (_, index) => (seed + index) % 256);
 const node = (seed: number, isRightSibling = true) => ({ hash: bytes(seed), isRightSibling });
@@ -139,5 +139,83 @@ describe("on-chain primitives", () => {
     const onchain = new OnchainClient(config, new HttpPipeline(config));
     const bundle = normalizeProofBundle(rawProof(), { fixtureId: 18_241_006, seq: 108, statKeys: [1, 2] });
     await expect(onchain.verifyView(bundle, {})).rejects.toMatchObject({ code: "SIMULATION_WALLET_MISSING", fix: expect.stringContaining("does not submit") });
+  });
+});
+
+describe("proof availability retry", () => {
+  const pending = (status: number) => new HttpError(`score stat proof failed with HTTP ${status}`, { code: "HTTP_STATUS", fix: "wait", status });
+
+  function manualClock() {
+    let at = 0;
+    const sleeps: number[] = [];
+    return {
+      policy: {
+        now: () => at,
+        sleep: async (ms: number) => { sleeps.push(ms); at += ms; },
+      },
+      sleeps,
+      advance: (ms: number) => { at += ms; },
+    };
+  }
+
+  test("retries pending statuses with bounded exponential backoff until the proof lands", async () => {
+    const clock = manualClock();
+    const fetchProof = vi.fn()
+      .mockRejectedValueOnce(pending(404))
+      .mockRejectedValueOnce(pending(425))
+      .mockRejectedValueOnce(pending(409))
+      .mockResolvedValueOnce("bundle");
+    await expect(waitForProofAvailability(fetchProof, { ...clock.policy, initialDelayMs: 100, multiplier: 2, maximumDelayMs: 150 })).resolves.toBe("bundle");
+    expect(fetchProof).toHaveBeenCalledTimes(4);
+    expect(clock.sleeps).toEqual([100, 150, 150]);
+  });
+
+  test("raises PROOF_AVAILABILITY_TIMEOUT once the bounded window is spent", async () => {
+    const clock = manualClock();
+    const fetchProof = vi.fn(async () => { throw pending(404); });
+    await expect(waitForProofAvailability(fetchProof, { ...clock.policy, initialDelayMs: 1_000, timeoutMs: 2_500 }))
+      .rejects.toMatchObject({ code: "PROOF_AVAILABILITY_TIMEOUT" });
+  });
+
+  test("propagates non-pending failures immediately and validates the policy", async () => {
+    const boom = new HttpError("score stat proof failed with HTTP 500", { code: "HTTP_STATUS", fix: "retry", status: 500 });
+    const fetchProof = vi.fn(async () => { throw boom; });
+    await expect(waitForProofAvailability(fetchProof, manualClock().policy)).rejects.toBe(boom);
+    expect(fetchProof).toHaveBeenCalledTimes(1);
+    await expect(waitForProofAvailability(fetchProof, { timeoutMs: -1 })).rejects.toMatchObject({ code: "PROOF_RETRY_POLICY_INVALID" });
+    expect(isProofPending(pending(404))).toBe(true);
+    expect(isProofPending(boom)).toBe(false);
+    expect(isProofPending(new Error("404"))).toBe(false);
+  });
+
+  test("honors an abort raised while waiting between attempts", async () => {
+    const controller = new AbortController();
+    const fetchProof = vi.fn(async () => { throw pending(404); });
+    const waiting = waitForProofAvailability(fetchProof, { signal: controller.signal, initialDelayMs: 5_000 });
+    queueMicrotask(() => controller.abort(new Error("operator stop")));
+    await expect(waiting).rejects.toThrow("operator stop");
+  });
+
+  test("ProofClient.fetch({retry}) rides out early 404s from a slow root anchor", async () => {
+    const responses = [
+      new Response("not anchored", { status: 404 }),
+      new Response("not anchored", { status: 404 }),
+      new Response(JSON.stringify(rawProof([1, 2])), { status: 200 }),
+    ];
+    const fetchMock = vi.fn(async () => responses.shift()!);
+    const http = new HttpPipeline(resolveClientConfig({ network: "mainnet", baseUrl: "http://replay.test", fetch: fetchMock }));
+    const data = {} as unknown as DataClient;
+    const proofs = new ProofClient(http, data);
+    const bundle = await proofs.fetch({ fixtureId: 18_241_006, seq: 400, statKeys: [1, 2], retry: { initialDelayMs: 1, maximumDelayMs: 2, timeoutMs: 60_000 } });
+    expect(bundle.fixtureId).toBe(18_241_006);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  test("ProofClient.fetch without retry keeps the single-attempt contract", async () => {
+    const fetchMock = vi.fn(async () => new Response("not anchored", { status: 404 }));
+    const http = new HttpPipeline(resolveClientConfig({ network: "mainnet", baseUrl: "http://replay.test", fetch: fetchMock }));
+    const proofs = new ProofClient(http, {} as unknown as DataClient);
+    await expect(proofs.fetch({ fixtureId: 1, seq: 1, statKeys: [1] })).rejects.toMatchObject({ status: 404 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

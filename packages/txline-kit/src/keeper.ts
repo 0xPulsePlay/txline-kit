@@ -3,7 +3,7 @@ import type { CanonicalScoreRecord } from "./data.js";
 import type { DataClient } from "./data.js";
 import { KeeperError } from "./errors.js";
 import type { BuiltValidation, OnchainClient } from "./onchain.js";
-import type { ProofBundle, ProofClient } from "./proofs.js";
+import type { ProofBundle, ProofClient, ProofRetryPolicy } from "./proofs.js";
 import type { CompiledMarket } from "./strategy.js";
 
 export interface PreparedSettlement {
@@ -19,6 +19,13 @@ export interface PrepareSettlementOptions {
   fixtureId: number;
   market: CompiledMarket;
   signal?: AbortSignal;
+  /**
+   * Proof-availability retry for the settlement proof fetch. TxLINE anchors
+   * daily roots on a delay after each interval closes, so the keeper waits
+   * (bounded, three minutes by default) instead of failing on the first 404.
+   * Pass false to restore the previous single-attempt behavior.
+   */
+  proofRetry?: ProofRetryPolicy | false;
 }
 
 export interface WatchAndSettleOptions extends PrepareSettlementOptions {
@@ -88,7 +95,15 @@ export class KeeperClient {
     }
     const finalRecord = await this.data.awaitFinal(options.fixtureId, options.signal ? { signal: options.signal } : {});
     options.market.assertSettlementRecord(finalRecord);
-    const proof = await this.proofs.fetch({ fixtureId: options.fixtureId, seq: finalSeq(finalRecord), statKeys: options.market.statKeys });
+    const retry: ProofRetryPolicy | undefined = options.proofRetry === false
+      ? undefined
+      : { timeoutMs: 180_000, ...(options.signal ? { signal: options.signal } : {}), ...options.proofRetry };
+    const proof = await this.proofs.fetch({
+      fixtureId: options.fixtureId,
+      seq: finalSeq(finalRecord),
+      statKeys: options.market.statKeys,
+      ...(retry ? { retry } : {}),
+    });
     const valid = await this.onchain.verifyView(proof, options.market.strategy);
     if (!valid) {
       throw keeperFailure(`TxLINE proof did not satisfy ${options.market.label}`, "KEEPER_PREDICATE_FALSE", "Choose the outcome whose predicate matches the proven final stats; never submit a settlement for false.");
