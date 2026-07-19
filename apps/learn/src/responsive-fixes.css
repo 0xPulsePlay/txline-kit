@@ -1,3 +1,15 @@
+.mini-fixture b.pre-match {
+  font-size: 15px;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+.scoreboard > b.pre-match {
+  font-size: 16px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
 @media (min-width: 721px) and (max-width: 1050px) {
   .body-grid {
     grid-template-columns: 110px minmax(0, 1fr);

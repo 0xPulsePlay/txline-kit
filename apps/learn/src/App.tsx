@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { modules, replayFixtures, settlementSteps, type ReplayEvent } from "./data";
+import { copy, modules, replayFixtures, settlementSteps, type ReplayEvent } from "./data";
 
 type Screen = "overview" | "replay" | "strategy" | "proof" | "settlement" | "modules";
 const screens: Array<{ id: Screen; label: string; index: string }> = [
@@ -66,10 +66,13 @@ function Overview({ navigate }: { navigate: (screen: Screen) => void }) {
         </button>)}
       </div>
     </section>
-    <section className="fixture-strip" aria-label="Synthetic fixture library">
-      <div><Eyebrow>Public by construction</Eyebrow><h2>Three synthetic matches.<br />Zero restricted feed data.</h2></div>
-      {replayFixtures.map((fixture) => <article key={fixture.fixtureId} className={`mini-fixture tone-${fixture.accent}`}>
-        <span>Fixture {fixture.fixtureId}</span><strong>{fixture.title}</strong><b>{fixture.result[0]} — {fixture.result[1]}</b><small>{fixture.events.length} deterministic records</small>
+    <section className="fixture-strip" aria-label={copy.fixtureAriaLabel}>
+      <div><Eyebrow>{copy.fixtureEyebrow}</Eyebrow><h2>{copy.fixtureHeadingLine1}<br />{copy.fixtureHeadingLine2}</h2></div>
+      {replayFixtures.map((fixture) => <article key={fixture.title} className={`mini-fixture tone-${fixture.accent}`}>
+        <span>Fixture {fixture.fixtureId}</span><strong>{fixture.title}</strong>
+        <b className={fixture.result ? "" : "pre-match"}>{fixture.result ? `${fixture.result[0]} — ${fixture.result[1]}` : "Pre-match · kickoff 19:00 UTC"}</b>
+        <small>{fixture.events.length} {fixture.source ? "real captured records" : "deterministic records"}</small>
+        {fixture.source ? <small>{fixture.source}</small> : null}
       </article>)}
     </section>
   </div>;
@@ -96,19 +99,25 @@ function ReplayLab() {
   }, [playing, fixture.events.length]);
   const visible = fixture.events.slice(0, cursor + 1);
   const current = fixture.events[cursor]!;
-  const score = [...visible].reverse().find((event) => event.score)?.score ?? [0, 0];
+  const score = [...visible].reverse().find((event) => event.score)?.score;
   const counts = useMemo(() => Object.fromEntries(["sse", "snapshot", "proof", "odds"].map((channel) => [channel, visible.filter((event) => event.channel === channel).length])), [visible]);
   return <div className="screen replay-screen" data-testid="replay-screen">
     <div className="screen-title"><div><Eyebrow>Deterministic virtual clock</Eyebrow><h1>Replay lab</h1></div><p>Scrub every captured envelope. The API shape stays constant while time becomes a tool.</p></div>
     <div className="replay-layout">
       <aside className="fixture-rail" aria-label="Choose replay fixture">
-        {replayFixtures.map((item, index) => <button className={index === fixtureIndex ? "active" : ""} key={item.fixtureId} onClick={() => setFixtureIndex(index)}>
+        {replayFixtures.map((item, index) => <button className={index === fixtureIndex ? "active" : ""} key={item.title} onClick={() => setFixtureIndex(index)}>
           <span>0{index + 1}</span><strong>{item.title}</strong><small>Fixture {item.fixtureId}</small>
         </button>)}
       </aside>
       <section className="replay-stage">
         <div className="scoreboard">
-          <div><small>Home</small><strong>{fixture.title.split(" v ")[0]}</strong></div><b>{score[0]}<i>:</i>{score[1]}</b><div className="align-right"><small>Away</small><strong>{fixture.title.split(" v ")[1]}</strong></div>
+          <div><small>Home</small><strong>{fixture.home}</strong></div>
+          {score
+            ? <b>{score[0]}<i>:</i>{score[1]}</b>
+            : fixture.source
+              ? <b className="pre-match">Pre-match · kickoff 19:00 UTC</b>
+              : <b>0<i>:</i>0</b>}
+          <div className="align-right"><small>Away</small><strong>{fixture.away}</strong></div>
         </div>
         <div className="timeline" aria-label={`Replay position ${cursor + 1} of ${fixture.events.length}`}>
           <div className="timeline__track"><i style={{ width: `${cursor / (fixture.events.length - 1) * 100}%` }} /></div>
@@ -220,7 +229,7 @@ export function App() {
   }, [screen]);
   return <div className="app-shell">
     <a className="skip-link" href="#content">Skip to content</a>
-    <header className="topbar"><button className="brand" onClick={() => navigate("overview")} aria-label="TxLINE Kit home"><SparkMark /><strong>TxLINE</strong><span>kit</span></button><div className="network"><i /> MAINNET PROOF · PUBLIC SYNTHETIC DATA</div><a href="https://github.com/0xPulsePlay/txline-kit" target="_blank" rel="noreferrer">GitHub ↗</a></header>
+    <header className="topbar"><button className="brand" onClick={() => navigate("overview")} aria-label="TxLINE Kit home"><SparkMark /><strong>TxLINE</strong><span>kit</span></button><div className="network"><i /> {copy.networkBadge}</div><a href="https://github.com/0xPulsePlay/txline-kit" target="_blank" rel="noreferrer">GitHub ↗</a></header>
     <div className="body-grid">
       <nav className="side-nav" aria-label="Learning screens">{screens.map((item) => <button key={item.id} aria-current={screen === item.id ? "page" : undefined} className={screen === item.id ? "active" : ""} onClick={() => navigate(item.id)}><span>{item.index}</span><strong>{item.label}</strong></button>)}</nav>
       <main id="content">{screen === "overview" ? <Overview navigate={navigate} /> : screen === "replay" ? <ReplayLab /> : screen === "strategy" ? <StrategyStudio /> : screen === "proof" ? <ProofAnatomy /> : screen === "settlement" ? <SettlementReceipt /> : <ModuleMap />}</main>
