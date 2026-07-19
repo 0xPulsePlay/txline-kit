@@ -54,25 +54,54 @@ describe("proof lifecycle", () => {
     expect(clean.state).toBe("canonical");
   });
 
-  test("refuses to seal content mutated after canonicalization", async () => {
+  test("refuses to seal an attestation whose subject and contentHash disagree", async () => {
     // Regression for the wi-3 review bug (a): sealAttestation trusted the
     // contentHash recorded at canonicalization time without ever rehashing
-    // the live subject, so mutating the subject stored on the attestation
-    // between canonicalAttestation and sealAttestation silently sealed a
-    // record whose contentHash no longer matched its actual content.
+    // the live subject, so an attestation whose subject and contentHash no
+    // longer agreed could still seal.
     //
-    // canonicalAttestation now deep-clones its subject (see the M6 fix
-    // below), so this exercises the check via the stored `canonical.subject`
-    // directly rather than the caller's original object -- mutating the
-    // caller's own object no longer reaches the attestation at all, which is
-    // exactly the M6 fix; the seal-time rehash check here still guards
-    // against direct tampering with the attestation's own subject.
+    // canonicalAttestation's subject is now deep-frozen (see the
+    // M6-residual fix below), so a caller can no longer mutate
+    // `canonical.subject` in place to simulate content that changed after
+    // canonicalization -- attempting that now throws (see the "returned
+    // subject is deep-frozen" test below). Exercise the same seal-time
+    // rehash-and-compare guard instead against a directly forged
+    // ProofAttestation object (e.g. one reconstructed from storage, or
+    // hand-built) whose subject and contentHash simply disagree: sealing
+    // must always recompute and compare, never trust a stored contentHash
+    // blindly.
     const canonical = await canonicalAttestation({ fixtureId: 42, headHash: "0xabc" });
-    (canonical.subject as { headHash: string }).headHash = "0xtampered";
-    await expect(sealAttestation(canonical, [anchor("aaaaaaaa", 1)])).rejects.toMatchObject({ code: "LIFECYCLE_CONTENT_MUTATED" });
-    // Restoring the original content makes it sealable again.
-    (canonical.subject as { headHash: string }).headHash = "0xabc";
+    const forged = { ...canonical, subject: { fixtureId: 42, headHash: "0xtampered" } };
+    await expect(sealAttestation(forged, [anchor("aaaaaaaa", 1)])).rejects.toMatchObject({ code: "LIFECYCLE_CONTENT_MUTATED" });
+    // The original, untouched attestation still seals fine.
     await expect(sealAttestation(canonical, [anchor("aaaaaaaa", 1)])).resolves.toMatchObject({ state: "verified" });
+  });
+
+  test("observeAttestation/canonicalAttestation's returned subject is itself deep-frozen, not just the outer attestation container", async () => {
+    // Regression for the M6-residual review bug: the prior fix's deep-clone
+    // stopped the caller's ORIGINAL object from leaking into the stored
+    // attestation, but Object.freeze() only shallow-freezes the outer
+    // attestation -- the returned `.subject` was itself still a plain,
+    // mutable object. Anyone holding the RETURNED attestation (not the
+    // caller's original) could mutate `attestation.subject.foo = "x"`
+    // directly and silently desync it from `contentHash`, with no
+    // revalidation on read. Prove the stored clone itself is now immutable:
+    // mutating the returned attestation's subject must either throw
+    // (strict mode, which vitest/ESM modules run under) or be a silent
+    // no-op -- either way the value must not actually change.
+    const observed = await observeAttestation({ fixtureId: 42, headHash: "0xabc" });
+    const canonical = await canonicalAttestation({ fixtureId: 42, headHash: "0xabc" });
+    for (const attestation of [observed, canonical]) {
+      const subject = attestation.subject as Record<string, unknown>;
+      expect(Object.isFrozen(subject)).toBe(true);
+      try {
+        subject.headHash = "0xtampered";
+      } catch {
+        // expected under strict mode
+      }
+      expect(subject.headHash).toBe("0xabc");
+      await expect(hashCanonical(attestation.subject)).resolves.toBe(attestation.contentHash);
+    }
   });
 
   test("subject stored on an attestation is independent of later mutation of the caller's original object", async () => {
