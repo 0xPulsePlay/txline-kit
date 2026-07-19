@@ -1,6 +1,6 @@
 {
   "name": "@0xpulseplay/txline-kit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Safe TypeScript, replay, and Solana CPI tooling for TxLINE",
   "license": "MIT OR Apache-2.0",
   "repository": {
@@ -62,6 +62,21 @@
       "types": "./dist/onchain.d.ts",
       "import": "./dist/onchain.js",
       "require": "./dist/onchain.cjs"
+    },
+    "./merkle": {
+      "types": "./dist/merkle.d.ts",
+      "import": "./dist/merkle.js",
+      "require": "./dist/merkle.cjs"
+    },
+    "./journal": {
+      "types": "./dist/journal.d.ts",
+      "import": "./dist/journal.js",
+      "require": "./dist/journal.cjs"
+    },
+    "./lifecycle": {
+      "types": "./dist/lifecycle.d.ts",
+      "import": "./dist/lifecycle.js",
+      "require": "./dist/lifecycle.cjs"
     },
     "./strategy": {
       "types": "./dist/strategy.d.ts",

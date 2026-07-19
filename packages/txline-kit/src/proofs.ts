@@ -2,7 +2,7 @@ import BN from "bn.js";
 import { z } from "zod";
 import type { CanonicalScoreRecord } from "./data.js";
 import { DataClient } from "./data.js";
-import { ProofError } from "./errors.js";
+import { HttpError, ProofError } from "./errors.js";
 import { HttpPipeline } from "./http.js";
 
 export type Bytes32 = readonly number[];
@@ -39,11 +39,27 @@ export interface FetchProofOptions {
   fixtureId: number;
   seq: number;
   statKeys: readonly number[];
+  retry?: ProofRetryPolicy | true;
+  /** Cancel the fetch even when no retry policy is active. Independent from
+   * `retry`'s own signal, which additionally governs the backoff loop once
+   * retry is enabled; passing `signal` alone must not switch on retry. */
+  signal?: AbortSignal;
 }
 
 export interface FinalProofOptions {
   statKeys?: readonly number[];
   signal?: AbortSignal;
+  retry?: ProofRetryPolicy | true;
+}
+
+export interface ProofRetryPolicy {
+  initialDelayMs?: number;
+  maximumDelayMs?: number;
+  multiplier?: number;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  now?: () => number;
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 }
 
 const rawRecord = z.record(z.string(), z.unknown());
@@ -164,23 +180,213 @@ function recordSeq(record: CanonicalScoreRecord): number {
   return record.seq!;
 }
 
+const PENDING_PROOF_STATUSES = new Set([404, 409, 425]);
+
+export function isProofPending(error: unknown): boolean {
+  return error instanceof HttpError && error.status !== undefined && PENDING_PROOF_STATUSES.has(error.status);
+}
+
+function sleepUnlessAborted(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const abort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", abort, { once: true });
+  });
+}
+
+function retryNumber(value: number | undefined, fallback: number, name: string, minimum: number): number {
+  const result = value ?? fallback;
+  if (!Number.isFinite(result) || result < minimum) {
+    proofFailure(`${name} must be a number of at least ${minimum}`, "PROOF_RETRY_POLICY_INVALID", "Use positive backoff bounds; omit fields to accept the defaults.");
+  }
+  return result;
+}
+
+export async function waitForProofAvailability<T>(fetchProof: () => Promise<T>, policy: ProofRetryPolicy = {}): Promise<T> {
+  const initial = retryNumber(policy.initialDelayMs, 750, "initialDelayMs", 1);
+  const maximum = retryNumber(policy.maximumDelayMs, 8_000, "maximumDelayMs", initial);
+  const multiplier = retryNumber(policy.multiplier, 1.7, "multiplier", 1);
+  const timeout = retryNumber(policy.timeoutMs, 360_000, "timeoutMs", 1);
+  const now = policy.now ?? Date.now;
+  const sleep = policy.sleep ?? sleepUnlessAborted;
+  const started = now();
+  let delay = initial;
+  for (;;) {
+    policy.signal?.throwIfAborted();
+    try {
+      return await fetchProof();
+    } catch (error) {
+      if (!isProofPending(error)) throw error;
+      const elapsed = now() - started;
+      if (elapsed >= timeout) {
+        proofFailure(`Proof remained unavailable for ${timeout}ms`, "PROOF_AVAILABILITY_TIMEOUT", "TxLINE anchors roots shortly after each five-minute interval closes; extend timeoutMs or retry once the daily root is anchored.", error);
+      }
+      // Cap the sleep to the remaining budget so wall-clock time never
+      // overshoots the advertised timeoutMs by a full backoff interval --
+      // previously the deadline was only checked BEFORE sleeping, then the
+      // full computed `delay` always elapsed regardless of how close to the
+      // deadline it was.
+      const remainingBudget = timeout - elapsed;
+      await sleep(Math.min(delay, remainingBudget), policy.signal);
+      delay = Math.min(maximum, Math.ceil(delay * multiplier));
+    }
+  }
+}
+
+export interface OddsProofOptions {
+  messageId: string;
+  /** Timestamp of the odds message the proof should cover (milliseconds). */
+  timestamp: number;
+  /** Route-drift override: TxLINE has renamed proof endpoints before, so the
+   * path is configurable without touching consumers. */
+  path?: string;
+  retry?: ProofRetryPolicy | true;
+}
+
+/** EXPERIMENTAL: the odds-proof wire shape is not yet confirmed against the
+ * live `daily_batch_roots` accounts, so known fields are decoded when present
+ * and the untouched response is always preserved in `raw`. */
+export interface ExperimentalOddsProof {
+  messageId: string;
+  requestedTimestamp: number;
+  raw: Record<string, unknown>;
+  oddsSubTreeProof?: readonly ProofNode[];
+  mainTreeProof?: readonly ProofNode[];
+  batchRoot?: Bytes32;
+}
+
+const DEFAULT_ODDS_PROOF_PATH = "/odds/validation";
+
+function optionalNodes(value: unknown, path: string): readonly ProofNode[] | undefined {
+  return Array.isArray(value) ? nodes(value, path) : undefined;
+}
+
+export function normalizeOddsProof(rawValue: unknown, request: OddsProofOptions): ExperimentalOddsProof {
+  const value = rawRecord.safeParse(rawValue);
+  if (!value.success) proofFailure("Odds proof response must be an object", "ODDS_PROOF_RESPONSE_INVALID", "Inspect the endpoint path (route drift) and provider response; the odds proof surface is experimental.", value.error);
+  const source = value.data;
+  const subTree = optionalNodes(source.oddsSubTreeProof ?? source.subTreeProof, "oddsSubTreeProof");
+  const mainTree = optionalNodes(source.mainTreeProof, "mainTreeProof");
+  const rootRaw = source.batchRoot ?? source.mainTreeRoot;
+  return Object.freeze({
+    messageId: request.messageId,
+    requestedTimestamp: request.timestamp,
+    raw: source,
+    ...(subTree ? { oddsSubTreeProof: subTree } : {}),
+    ...(mainTree ? { mainTreeProof: mainTree } : {}),
+    ...(rootRaw === undefined ? {} : { batchRoot: decodeBytes32(rootRaw, "batchRoot") }),
+  });
+}
+
+/**
+ * Merge a top-level AbortSignal into a proof retry policy. The signal takes
+ * effect both between retry attempts (checked in waitForProofAvailability's
+ * loop and its backoff sleep) and for the in-flight HTTP request itself. A
+ * signal already present on an explicit retry policy wins over the
+ * top-level one, mirroring KeeperClient.prepare's merge precedence.
+ */
+function mergeRetrySignal(retry: ProofRetryPolicy | true | undefined, signal: AbortSignal | undefined): ProofRetryPolicy | true | undefined {
+  if (!signal) return retry;
+  if (retry === undefined) return { signal };
+  if (retry === true) return { signal };
+  return { signal, ...retry };
+}
+
 export class ProofClient {
   constructor(private readonly http: HttpPipeline, private readonly data: DataClient) {}
 
   async fetch(options: FetchProofOptions): Promise<ProofBundle> {
     requireRequest(options);
-    const query = new URLSearchParams({ fixtureId: String(options.fixtureId), seq: String(options.seq), statKeys: options.statKeys.join(",") });
-    const response = await this.http.request(`/scores/stat-validation?${query}`);
-    await this.http.expectOk(response, "score stat proof");
-    let raw: unknown;
-    try { raw = await response.json(); } catch (cause) {
-      proofFailure("Score proof endpoint did not return valid JSON", "PROOF_JSON_INVALID", "Inspect provider availability and the selected replay or network host.", cause);
-    }
-    return normalizeProofBundle(raw, options);
+    const retrySignal = options.retry && options.retry !== true ? options.retry.signal : undefined;
+    const requestSignal = retrySignal ?? options.signal;
+    const once = async (): Promise<ProofBundle> => {
+      const query = new URLSearchParams({ fixtureId: String(options.fixtureId), seq: String(options.seq), statKeys: options.statKeys.join(",") });
+      const response = await this.http.request(`/scores/stat-validation?${query}`, requestSignal ? { signal: requestSignal } : {});
+      await this.http.expectOk(response, "score stat proof");
+      let raw: unknown;
+      try { raw = await response.json(); } catch (cause) {
+        proofFailure("Score proof endpoint did not return valid JSON", "PROOF_JSON_INVALID", "Inspect provider availability and the selected replay or network host.", cause);
+      }
+      return normalizeProofBundle(raw, options);
+    };
+    if (options.retry === undefined) return once();
+    return waitForProofAvailability(once, options.retry === true ? {} : options.retry);
   }
 
+  /** EXPERIMENTAL odds-checkpoint proof fetch. The response shape is decoded
+   * permissively (see ExperimentalOddsProof); validate against a live
+   * `daily_batch_roots` account before relying on it for settlement. */
+  async fetchOdds(options: OddsProofOptions): Promise<ExperimentalOddsProof> {
+    if (typeof options.messageId !== "string" || options.messageId.length === 0) proofFailure("messageId must be a non-empty string", "ODDS_PROOF_MESSAGE_ID_INVALID", "Pass MessageId from a canonical odds record.");
+    if (!Number.isSafeInteger(options.timestamp) || options.timestamp < 0) proofFailure("timestamp must be a non-negative integer in milliseconds", "ODDS_PROOF_TIMESTAMP_INVALID", "Pass the odds record's millisecond timestamp.");
+    // `path` is a same-origin-relative route-drift override, not a fetch
+    // destination. HttpPipeline.apiUrl passes through any absolute
+    // (http(s)://) or scheme-relative (//host/...) path UNCHANGED and the
+    // request pipeline still attaches the live JWT + X-Api-Token headers
+    // regardless of destination -- so an absolute path here would send an
+    // authenticated request to an arbitrary origin. Reject before it ever
+    // reaches this.http.request(...).
+    //
+    // Type check FIRST: a non-string `path` (e.g. an array like
+    // `["https://evil.example/steal"]`) skips a `typeof === "string"`-gated
+    // regex check entirely, then gets template-literal-coerced to the
+    // malicious string at the fetch call site below (a single-element array
+    // stringifies via Array.prototype.toString with no separator, producing
+    // exactly the absolute URL). So validate the type before ever touching
+    // the string-content checks.
+    if (options.path !== undefined && typeof options.path !== "string") {
+      proofFailure(
+        "fetchOdds path must be a string when provided",
+        "ODDS_PROOF_PATH_INVALID",
+        "Pass a relative route such as \"/odds/validation\" as a string; non-string values (arrays, objects) can coerce to an absolute URL at the request call site.",
+      );
+    }
+    if (typeof options.path === "string" && (/^https?:\/\//i.test(options.path) || options.path.startsWith("//"))) {
+      proofFailure(
+        `fetchOdds path must be a same-origin-relative route, not an absolute or scheme-relative URL (received ${options.path})`,
+        "ODDS_PROOF_PATH_INVALID",
+        "Pass a relative route such as \"/odds/validation\"; absolute or scheme-relative paths would send the authenticated request to an arbitrary origin.",
+      );
+    }
+    const retrySignal = options.retry && options.retry !== true ? options.retry.signal : undefined;
+    const once = async (): Promise<ExperimentalOddsProof> => {
+      const query = new URLSearchParams({ messageId: options.messageId, timestamp: String(options.timestamp) });
+      const response = await this.http.request(`${options.path ?? DEFAULT_ODDS_PROOF_PATH}?${query}`, retrySignal ? { signal: retrySignal } : {});
+      await this.http.expectOk(response, "odds proof");
+      let raw: unknown;
+      try { raw = await response.json(); } catch (cause) {
+        proofFailure("Odds proof endpoint did not return valid JSON", "ODDS_PROOF_JSON_INVALID", "Inspect provider availability and the configured odds proof path.", cause);
+      }
+      return normalizeOddsProof(raw, options);
+    };
+    if (options.retry === undefined) return once();
+    return waitForProofAvailability(once, options.retry === true ? {} : options.retry);
+  }
+
+  /** `retry` stays opt-in even when `signal` is supplied: a caller passing
+   * only a cancellation signal must keep the documented single-attempt
+   * fail-fast default, not silently gain a bounded multi-minute retry wait.
+   * The signal still cancels the one HTTP attempt via `fetch`'s own
+   * `signal` field, independent of whether retry is active. */
   async forFinal(fixtureId: number, options: FinalProofOptions = {}): Promise<ProofBundle> {
     const final = await this.data.awaitFinal(fixtureId, options.signal ? { signal: options.signal } : {});
-    return this.fetch({ fixtureId, seq: recordSeq(final), statKeys: options.statKeys ?? [1, 2] });
+    const retry = options.retry === undefined ? undefined : mergeRetrySignal(options.retry, options.signal);
+    return this.fetch({
+      fixtureId,
+      seq: recordSeq(final),
+      statKeys: options.statKeys ?? [1, 2],
+      ...(retry === undefined ? {} : { retry }),
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
   }
 }

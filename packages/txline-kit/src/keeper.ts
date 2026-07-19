@@ -3,7 +3,7 @@ import type { CanonicalScoreRecord } from "./data.js";
 import type { DataClient } from "./data.js";
 import { KeeperError } from "./errors.js";
 import type { BuiltValidation, OnchainClient } from "./onchain.js";
-import type { ProofBundle, ProofClient } from "./proofs.js";
+import type { ProofBundle, ProofClient, ProofRetryPolicy } from "./proofs.js";
 import type { CompiledMarket } from "./strategy.js";
 
 export interface PreparedSettlement {
@@ -19,6 +19,18 @@ export interface PrepareSettlementOptions {
   fixtureId: number;
   market: CompiledMarket;
   signal?: AbortSignal;
+  /**
+   * Proof-availability retry for the settlement proof fetch. TxLINE anchors
+   * daily roots on a delay after each interval closes, so the underlying
+   * proof fetch can 404 briefly after the interval closes.
+   *
+   * Defaults to the single-attempt, fail-fast behavior (no retry) when
+   * omitted entirely, matching the original v0.1.0 contract. Pass `true` to
+   * opt in to the bounded wait (three minutes by default), or an explicit
+   * `ProofRetryPolicy` to tune it. Pass `false` to be explicit about
+   * single-attempt behavior.
+   */
+  proofRetry?: ProofRetryPolicy | boolean;
 }
 
 export interface WatchAndSettleOptions extends PrepareSettlementOptions {
@@ -55,6 +67,19 @@ function finalSeq(record: CanonicalScoreRecord): number {
   return record.seq!;
 }
 
+/**
+ * Resolve the caller's `proofRetry` option into the `ProofRetryPolicy` (if
+ * any) to hand to `ProofClient.fetch`. Omitted or `false` means single
+ * attempt (undefined -- no retry key sent at all), matching v0.1.0's
+ * fail-fast contract. `true` opts in to the default bounded wait; an
+ * explicit policy object opts in and overrides the defaults it sets.
+ */
+function resolveProofRetry(proofRetry: ProofRetryPolicy | boolean | undefined, signal: AbortSignal | undefined): ProofRetryPolicy | undefined {
+  if (proofRetry === undefined || proofRetry === false) return undefined;
+  const defaults: ProofRetryPolicy = { timeoutMs: 180_000, ...(signal ? { signal } : {}) };
+  return proofRetry === true ? defaults : { ...defaults, ...proofRetry };
+}
+
 function aborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted) throw keeperFailure("Settlement was aborted", "KEEPER_ABORTED", "Retry with a live AbortSignal when settlement should continue.", signal.reason);
 }
@@ -88,7 +113,19 @@ export class KeeperClient {
     }
     const finalRecord = await this.data.awaitFinal(options.fixtureId, options.signal ? { signal: options.signal } : {});
     options.market.assertSettlementRecord(finalRecord);
-    const proof = await this.proofs.fetch({ fixtureId: options.fixtureId, seq: finalSeq(finalRecord), statKeys: options.market.statKeys });
+    const retry = resolveProofRetry(options.proofRetry, options.signal);
+    const proof = await this.proofs.fetch({
+      fixtureId: options.fixtureId,
+      seq: finalSeq(finalRecord),
+      statKeys: options.market.statKeys,
+      ...(retry ? { retry } : {}),
+      // Independent of whether `retry` is present: the default (fail-fast,
+      // proofRetry disabled/omitted) path only ever gets a signal via
+      // `retry.signal` when retry IS enabled, so aborting a default keeper
+      // settlement previously could not cancel its in-flight proof HTTP
+      // request. Thread the top-level signal through unconditionally.
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
     const valid = await this.onchain.verifyView(proof, options.market.strategy);
     if (!valid) {
       throw keeperFailure(`TxLINE proof did not satisfy ${options.market.label}`, "KEEPER_PREDICATE_FALSE", "Choose the outcome whose predicate matches the proven final stats; never submit a settlement for false.");
