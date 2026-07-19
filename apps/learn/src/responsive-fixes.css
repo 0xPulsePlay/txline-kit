@@ -4,6 +4,17 @@
   }
 }
 
+@media (min-width: 721px) and (max-width: 900px) {
+  .hero-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .signal-card {
+    width: min(80%, 390px);
+    margin: 55px auto 30px;
+  }
+}
+
 @media (max-width: 900px) {
   .module-map {
     height: auto;
