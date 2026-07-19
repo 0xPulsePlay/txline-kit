@@ -119,6 +119,12 @@ export class KeeperClient {
       seq: finalSeq(finalRecord),
       statKeys: options.market.statKeys,
       ...(retry ? { retry } : {}),
+      // Independent of whether `retry` is present: the default (fail-fast,
+      // proofRetry disabled/omitted) path only ever gets a signal via
+      // `retry.signal` when retry IS enabled, so aborting a default keeper
+      // settlement previously could not cancel its in-flight proof HTTP
+      // request. Thread the top-level signal through unconditionally.
+      ...(options.signal ? { signal: options.signal } : {}),
     });
     const valid = await this.onchain.verifyView(proof, options.market.strategy);
     if (!valid) {

@@ -177,6 +177,25 @@ describe("proof availability retry", () => {
       .rejects.toMatchObject({ code: "PROOF_AVAILABILITY_TIMEOUT" });
   });
 
+  test("caps the backoff sleep to the remaining timeout budget so elapsed time never overshoots timeoutMs", async () => {
+    // Regression: the deadline was previously only checked BEFORE sleeping,
+    // then the full computed backoff `delay` always elapsed regardless of
+    // how close to the deadline it was -- so wall-clock time could overshoot
+    // the advertised timeoutMs by up to one full backoff interval. With
+    // initialDelayMs=1000, multiplier=2, timeoutMs=1500: the first sleep is
+    // capped to min(1000, 1500)=1000 (elapsed 0 -> 1000); the second would
+    // naturally be 2000ms of backoff, but only 500ms remains until the
+    // 1500ms deadline, so it must be capped to 500 (elapsed 1000 -> 1500),
+    // at which point the timeout fires exactly at the advertised budget
+    // instead of overshooting to 3000ms.
+    const clock = manualClock();
+    const fetchProof = vi.fn(async () => { throw pending(404); });
+    await expect(waitForProofAvailability(fetchProof, { ...clock.policy, initialDelayMs: 1_000, multiplier: 2, maximumDelayMs: 8_000, timeoutMs: 1_500 }))
+      .rejects.toMatchObject({ code: "PROOF_AVAILABILITY_TIMEOUT" });
+    expect(clock.sleeps).toEqual([1_000, 500]);
+    expect(clock.sleeps.reduce((sum, ms) => sum + ms, 0)).toBeLessThanOrEqual(1_500);
+  });
+
   test("propagates non-pending failures immediately and validates the policy", async () => {
     const boom = new HttpError("score stat proof failed with HTTP 500", { code: "HTTP_STATUS", fix: "retry", status: 500 });
     const fetchProof = vi.fn(async () => { throw boom; });

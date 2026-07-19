@@ -110,6 +110,29 @@ describe("canonical journal", () => {
     await expect(hashCanonical(forward)).resolves.toBe(await hashCanonical(reversed));
   });
 
+  test("conflict report recovers the full sourceId even when messageId contains an embedded NUL byte (the same separator used for the internal identity key)", async () => {
+    // Regression for the new-3 review bug: canonicalizeJournal builds its
+    // internal conflict "identity" key as `${source}\u0000${sourceId}` and
+    // previously recovered it via `identity.split("\u0000")` destructured
+    // as exactly [source, sourceId]. An odds record's messageId is a
+    // free-form, unvalidated provider string, so if it legitimately
+    // contains an embedded NUL byte -- the very separator used internally
+    // -- split() produces more than two elements and the destructured
+    // sourceId in the resulting JournalConflict silently truncates to just
+    // the portion before the embedded NUL. This is diagnostic-only (does
+    // not affect payloadHash/headHash), but the reported sourceId must
+    // still be the full original string.
+    const messageIdWithNul = "vendor-batch\u0000tail-42";
+    const oddsA = await journalRecord("odds", normalizeOddsRecord({ FixtureId: 42, MessageId: messageIdWithNul, Ts: at + 1, Prices: [1.8, 3.9, 4.9] }));
+    const oddsB = await journalRecord("odds", normalizeOddsRecord({ FixtureId: 42, MessageId: messageIdWithNul, Ts: at + 1, Prices: [2.1, 3.5, 4.2] }));
+    expect(oddsA.sourceId).toBe(messageIdWithNul);
+
+    const journal = await canonicalizeJournal([oddsA, oddsB]);
+    expect(journal.conflicts).toHaveLength(1);
+    expect(journal.conflicts[0]!.source).toBe("odds");
+    expect(journal.conflicts[0]!.sourceId).toBe(messageIdWithNul);
+  });
+
   test("journalRecord's stored payload is independent of later mutation of the caller's original object", async () => {
     // Regression for the M6 review bug: Object.freeze({ ...payload, ... })
     // only shallow-freezes the returned record; the referenced payload
@@ -125,6 +148,29 @@ describe("canonical journal", () => {
     expect(record.payload).toEqual(payloadBefore);
     expect(record.payload).not.toBe(original);
     expect((record.payload as Record<string, unknown>).action).not.toBe("tampered");
+    await expect(hashCanonical(record.payload)).resolves.toBe(record.payloadHash);
+  });
+
+  test("journalRecord's returned payload is itself deep-frozen, not just the outer record container", async () => {
+    // Regression for the M6-residual review bug: the prior fix's deep-clone
+    // stopped the caller's ORIGINAL object from leaking into the stored
+    // record, but Object.freeze() only shallow-freezes the outer record --
+    // the returned `.payload` was still a plain, mutable object. Anyone
+    // holding the RETURNED record (not the caller's original) could mutate
+    // `record.payload.foo = "x"` directly and silently desync it from
+    // `payloadHash`, with no revalidation on read. Prove the stored clone
+    // itself is now immutable: mutating the returned record's payload must
+    // either throw (strict mode, which vitest/ESM modules run under) or be
+    // a silent no-op -- either way the value must not actually change.
+    const record = await journalRecord("score", normalizeScoreRecord({ FixtureId: 42, Seq: 12, Ts: at + 12, Action: "goal" }));
+    const payload = record.payload as Record<string, unknown>;
+    expect(Object.isFrozen(payload)).toBe(true);
+    try {
+      payload.action = "tampered"; // strict-mode ESM: throws; if it somehow didn't, the assertion below still catches a silent no-op vs a real mutation.
+    } catch {
+      // expected under strict mode
+    }
+    expect(payload.action).toBe("goal");
     await expect(hashCanonical(record.payload)).resolves.toBe(record.payloadHash);
   });
 

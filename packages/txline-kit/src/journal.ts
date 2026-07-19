@@ -87,6 +87,25 @@ export function hashCanonical(value: unknown): Promise<string> {
   return sha256Hex(canonicalStringify(value));
 }
 
+/**
+ * Recursively freeze a value's own nested objects/arrays. Object.freeze is
+ * shallow, so freezing only the outer container leaves any nested plain
+ * object or array still mutable in place. Safe for the payload shapes this
+ * module actually stores (the JSON.parse output of a canonical-JSON
+ * round-trip: plain objects, arrays, strings, numbers, booleans, null --
+ * nothing else can appear), so a simple own-enumerable-property walk is
+ * sufficient without over-engineering for shapes JSON can't produce.
+ */
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const key of Object.keys(value as Record<string, unknown>)) {
+      deepFreeze((value as Record<string, unknown>)[key]);
+    }
+  }
+  return value;
+}
+
 async function chainHash(parts: readonly string[][]): Promise<string> {
   let head = ZERO_HASH;
   for (const part of parts) head = await sha256Hex([CHAIN_TAG, head, ...part].join("\u0000"));
@@ -114,14 +133,25 @@ export async function journalRecord<T extends CanonicalScoreRecord | CanonicalOd
     if (typeof messageId !== "string" || messageId.length === 0) journalFailure("Odds journal records need a messageId", "JOURNAL_SOURCE_ID_MISSING", "Journal odds records that include MessageId.");
     sourceId = messageId;
   }
-  const payloadHash = await hashCanonical(payload);
-  // Deep-clone the payload via a canonical-JSON round-trip before freezing:
-  // Object.freeze only shallow-freezes this record, so a caller who mutates
-  // the original `payload` object after journaling would otherwise make the
-  // "frozen" record's exposed `.payload` reflect the mutation while
-  // `.payloadHash` still attests to the pre-mutation bytes. Cloning makes
-  // the stored reference independent of the caller's original object.
+  // Deep-clone the payload via a canonical-JSON round-trip BEFORE hashing
+  // (and before any `await`): a caller who mutates their original `payload`
+  // object synchronously, before this clone is taken, could otherwise
+  // desync the eventual hash (computed from the original) from the clone
+  // that actually gets stored -- a narrow TOCTOU window. Cloning first and
+  // hashing the clone means the hash always attests to exactly the bytes
+  // that get frozen and returned.
   const clonedPayload = JSON.parse(canonicalStringify(payload)) as T;
+  const payloadHash = await hashCanonical(clonedPayload);
+  // Object.freeze only shallow-freezes this record's outer container, so
+  // without a recursive freeze the returned `.payload` would still be a
+  // plain, mutable object -- anyone holding the record could mutate
+  // `record.payload.foo = "x"` directly and silently desync it from
+  // `payloadHash`, with no revalidation on read. deepFreeze walks the
+  // clone (already JSON-shaped: plain objects/arrays/primitives from the
+  // JSON.parse above, nothing else can appear) and freezes every nested
+  // object/array so the stored value is genuinely immutable, not just its
+  // outer wrapper.
+  deepFreeze(clonedPayload);
   return Object.freeze({
     source,
     fixtureId: fixtureId!,
@@ -182,7 +212,16 @@ export async function canonicalizeJournal<T extends CanonicalScoreRecord | Canon
   const conflicts: JournalConflict[] = [...byIdentity.entries()]
     .filter(([, hashes]) => hashes.size > 1)
     .map(([identity, hashes]) => {
-      const [source, sourceId] = identity.split("\u0000") as [JournalSource, string];
+      // Recover {source, sourceId} via indexOf + slice on the FIRST
+      // separator occurrence, not split() + 2-element destructure: a
+      // provider's free-form messageId (used verbatim as an odds
+      // sourceId, unvalidated) could legitimately contain an embedded NUL
+      // byte, and split() would then produce more than two elements,
+      // silently truncating the destructured sourceId in this
+      // diagnostic-only conflict report.
+      const separatorIndex = identity.indexOf("\u0000");
+      const source = identity.slice(0, separatorIndex) as JournalSource;
+      const sourceId = identity.slice(separatorIndex + 1);
       return Object.freeze({ source, sourceId, hashes: Object.freeze([...hashes].sort()) });
     })
     // Sort by (source, sourceId), not sourceId alone: a score record's
