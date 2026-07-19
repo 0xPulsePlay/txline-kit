@@ -145,7 +145,13 @@ export function impliedProbabilities(record: CanonicalOddsRecord, options: { pri
     names.forEach((name, index) => {
       const outcome = outcomeFor(name);
       const value = Number(percentages[index]);
-      if (outcome && Number.isFinite(value) && value > 0) raw[outcome] = value > 1 ? value / 100 : value;
+      // TxLINE's feed publishes percentages on a 0-100 scale unconditionally
+      // -- always divide by 100, never infer the scale from the value. An
+      // outcome at or below 1% (e.g. "1" or "0.8") is a legitimate low
+      // probability, not evidence the value is already a 0-1 fraction; a
+      // conditional heuristic here mishandled exactly those low outcomes
+      // (e.g. "0.8" became 0.8 = 80% instead of 0.008 = 0.8%).
+      if (outcome && Number.isFinite(value) && value > 0) raw[outcome] = value / 100;
     });
   } else if (record.prices && record.prices.length > 0) {
     source = "prices";
