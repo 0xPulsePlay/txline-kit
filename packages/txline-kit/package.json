@@ -68,6 +68,11 @@
       "import": "./dist/merkle.js",
       "require": "./dist/merkle.cjs"
     },
+    "./journal": {
+      "types": "./dist/journal.d.ts",
+      "import": "./dist/journal.js",
+      "require": "./dist/journal.cjs"
+    },
     "./strategy": {
       "types": "./dist/strategy.d.ts",
       "import": "./dist/strategy.js",
