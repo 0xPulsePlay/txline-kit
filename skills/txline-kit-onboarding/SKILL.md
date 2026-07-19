@@ -115,12 +115,18 @@ isn't yet validated against live `daily_batch_roots` accounts, so decoding is
 permissive).
 
 Rules that prevent real bugs:
-- Proof roots anchor on a delay — always pass `retry` (or accept the keeper's
-  default wait) instead of treating early 404s as failure.
+- Proof roots anchor on a delay — pass `retry` on `ProofClient.fetch`, or
+  `proofRetry: true` (or a policy object) on `keeper.prepare`/
+  `watchAndSettle`, instead of treating early 404s as failure. Both default
+  to a single fail-fast attempt when omitted; the keeper does not wait
+  unless you opt in.
 - Proof validity and match finality are separate claims: settle only from a
   record that passes `isSettlementFinalisation`, and bind the proof to the
   intended fixture and sequence.
-- Timestamps are milliseconds; PDA helpers reject or heal seconds inputs.
+- Timestamps are milliseconds; `deriveRootPda`/`healTimestampMillis` heal
+  seconds inputs. `dailyScoresPda` only rejects a seconds-unit input when
+  called with `{ strict: true }` — it silently derives from the raw value
+  by default (matching the original v0.1.0 contract).
 - Use `/lifecycle` states (`observed → canonical → verified`, quarantine on
   conflict) as the vocabulary for what the app may claim at each stage.
 - `verifyView` is a **live** read-only Solana simulation: it needs a real RPC

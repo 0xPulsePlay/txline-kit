@@ -4,8 +4,9 @@ The keeper composes the full settlement pipeline: watch a fixture, wait for
 *settlement* finalisation (`isSettlementFinalisation` — `game_finalised` +
 `StatusId 100`, accepting the provider's real-world period-omitted variant,
 not only the narrower `isStrictFinalisation`'s exact `Period 100`), fetch the
-ordered proof (waiting out slow root anchoring), verify read-only, build the
-validation instruction, and hand it to consumer-owned submission code.
+ordered proof (single attempt by default, or waiting out slow root anchoring
+when opted in via `proofRetry`), verify read-only, build the validation
+instruction, and hand it to consumer-owned submission code.
 
 ```ts
 // Dry run: stops after read-only proof verification. Always do this first.
@@ -21,9 +22,10 @@ await txline.keeper.watchAndSettle({
 
 Contracts worth knowing:
 
-- `prepare` waits (bounded, 3 minutes by default) for proof availability
-  instead of failing on the first 404; `proofRetry: false` restores
-  single-attempt, a policy object tunes it.
+- `prepare` fails fast on the first 404 by default (single attempt, matching
+  v0.1.0); pass `proofRetry: true` to wait (bounded, 3 minutes by default)
+  for proof availability instead, or a policy object to tune the wait.
+  `proofRetry: false` is equivalent to the default (explicit single-attempt).
 - A false predicate refuses to settle (`KEEPER_PREDICATE_FALSE`) — the keeper
   never submits a settlement for an outcome the proof does not prove.
 - Submission retries are bounded (1–10, default 3) with confirmation checking

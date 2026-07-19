@@ -23,8 +23,10 @@ TxLINE root accounts are seeded by epoch day (u16 little-endian). Timestamps
 are **milliseconds**; a seconds value produces a wrong but valid-looking
 account. The SDK closes the trap:
 
-- `dailyScoresPda(ms, programId)` — rejects seconds-unit inputs with
-  `PDA_TIMESTAMP_UNIT_SUSPECT`.
+- `dailyScoresPda(ms, programId, { strict })` — defaults to `strict: false`
+  (v0.1.0's original behavior: derives the PDA from the timestamp as given,
+  even for a seconds-unit input). Pass `{ strict: true }` to reject
+  seconds-unit inputs with `PDA_TIMESTAMP_UNIT_SUSPECT` instead.
 - `deriveRootPda({namespace, timestamp, programId})` — derives any of
   `daily_scores_roots`, `daily_batch_roots`, `ten_daily_fixtures_roots`
   (ten-day bucketing included) and heals seconds inputs.
