@@ -77,3 +77,18 @@ test("captures the Phase 7 visual proof matrix", async ({ page }, testInfo) => {
     });
   }
 });
+
+test("/story loads directly on a fresh navigation with real content, and links back to the app", async ({ page }) => {
+  await page.goto("/story");
+  await expect(page.getByRole("heading", { name: /Solana settlement you can inspect/i })).toBeVisible();
+  await expect(page.getByText(/REAL, live-captured data/i)).toBeVisible();
+  await expect(page.getByText("Spain v Argentina")).toBeVisible();
+  await expect(page.getByText("Another team")).toBeVisible();
+  await expect(page.getByRole("link", { name: /View the real commit on GitHub/i })).toHaveAttribute("href", /proofline\/commit/);
+
+  const width = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
+  expect(width.scroll, "/story horizontal overflow").toBeLessThanOrEqual(width.client);
+
+  await page.getByRole("link", { name: "Open the interactive app" }).click();
+  await expect(page.getByRole("heading", { name: /See the match/i })).toBeVisible();
+});
