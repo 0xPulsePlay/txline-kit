@@ -329,6 +329,14 @@ describe("root PDA namespaces and timestamp healing", () => {
       expect(deriveRootPda({ namespace: "daily_scores_roots", timestamp: smallMillis, timestampUnit: "ms", programId }).toBase58())
         .toBe(expected("daily_scores_roots", epochDay));
     });
+
+    test("oddsBatchRootPda (deriveRootPda's daily_batch_roots counterpart) gets the same Date/timestampUnit bypass", () => {
+      const epochDay = Math.floor(smallMillis / 86_400_000);
+      expect(oddsBatchRootPda(new Date(smallMillis), programId).toBase58())
+        .toBe(expected("daily_batch_roots", epochDay));
+      expect(oddsBatchRootPda(smallMillis, programId, "ms").toBase58())
+        .toBe(expected("daily_batch_roots", epochDay));
+    });
   });
 });
 

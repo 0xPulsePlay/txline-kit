@@ -78,7 +78,7 @@ export function deriveRootPda(input: { namespace: RootNamespace; timestamp: numb
  * `deriveRootPda` — a `Date` instance or explicit `timestampUnit` bypasses
  * the seconds-vs-milliseconds heuristic entirely. */
 export function oddsBatchRootPda(timestamp: number | Date, programId: PublicKey, timestampUnit?: TimestampUnit): PublicKey {
-  return deriveRootPda({ namespace: "daily_batch_roots", timestamp, timestampUnit, programId });
+  return deriveRootPda({ namespace: "daily_batch_roots", timestamp, programId, ...(timestampUnit === undefined ? {} : { timestampUnit }) });
 }
 
 /** Derive the daily scores root PDA. A `Date` instance is unambiguous
