@@ -5,6 +5,7 @@ import {
   classifyScoreEvent,
   epochDay,
   finalisationEvidence,
+  impliedProbabilities,
   isStrictFinalisation,
   isSettlementFinalisation,
   normalizeOddsRecord,
@@ -12,6 +13,7 @@ import {
   semanticEvents,
   updateBucket,
 } from "../src/data.js";
+import type { CanonicalOddsRecord } from "../src/data.js";
 import { HttpPipeline } from "../src/http.js";
 import { resolveClientConfig } from "../src/core.js";
 import { parseSseBlock, SseDecoder, streamSse } from "../src/sse.js";
@@ -140,5 +142,111 @@ describe("historical, live, and odds adapters", () => {
     const odds = tx.data.odds.stream({ minRetryMs: 0 });
     await expect(odds.next()).resolves.toMatchObject({ value: { fixtureId: 7, messageId: "o1", prices: [2.1] } });
     await odds.return(undefined);
+  });
+});
+
+describe("implied probabilities", () => {
+  const base = { fixtureId: 42, priceNames: ["Home", "Draw", "Away"] };
+
+  test("prefers percentages and normalizes away the margin", () => {
+    const result = impliedProbabilities({ ...base, percentages: ["46.9", "29.2", "26.3"] } as CanonicalOddsRecord);
+    expect(result.source).toBe("percentages");
+    expect(result.home + result.draw + result.away).toBeCloseTo(1, 12);
+    expect(result.home).toBeCloseTo(0.469 / 1.024, 3);
+    expect(result.overround).toBeCloseTo(0.024, 3);
+    expect(Object.isFrozen(result)).toBe(true);
+  });
+
+  test("scales an exact 1% outcome to 0.01, not 100%", () => {
+    // Regression for the H1 review bug: `value > 1 ? value / 100 : value`
+    // left a "1" percentage un-divided, producing probability 1 (100%)
+    // instead of 0.01 (1%).
+    const result = impliedProbabilities({ ...base, percentages: ["1", "1", "98"] } as CanonicalOddsRecord);
+    expect(result.source).toBe("percentages");
+    expect(result.home).toBeCloseTo(0.01, 6);
+    expect(result.draw).toBeCloseTo(0.01, 6);
+    expect(result.away).toBeCloseTo(0.98, 6);
+    expect(result.home + result.draw + result.away).toBeCloseTo(1, 12);
+  });
+
+  test("scales a sub-1% outcome to its true fraction, not an inflated 80%", () => {
+    // Regression for the H1 review bug: `value > 1 ? value / 100 : value`
+    // left "0.8" un-divided, producing probability 0.8 (80%) instead of
+    // 0.008 (0.8%).
+    const result = impliedProbabilities({ ...base, percentages: ["0.8", "1.2", "98"] } as CanonicalOddsRecord);
+    expect(result.source).toBe("percentages");
+    expect(result.home).toBeCloseTo(0.008, 6);
+    expect(result.home).toBeLessThan(0.01);
+    expect(result.draw).toBeCloseTo(0.012, 6);
+    expect(result.away).toBeCloseTo(0.98, 6);
+    expect(result.home + result.draw + result.away).toBeCloseTo(1, 12);
+  });
+
+  test("inverts decimal prices and detects TxLINE's milli-odds scaling", () => {
+    const plain = impliedProbabilities({ ...base, prices: [1.85, 3.9, 4.75] } as CanonicalOddsRecord);
+    const milli = impliedProbabilities({ ...base, prices: [1_850, 3_900, 4_750] } as CanonicalOddsRecord);
+    expect(plain.source).toBe("prices");
+    expect(milli.home).toBeCloseTo(plain.home, 12);
+    expect(milli.draw).toBeCloseTo(plain.draw, 12);
+    expect(plain.overround).toBeGreaterThan(0);
+    const forced = impliedProbabilities({ ...base, prices: [1_850, 3_900, 4_750] } as CanonicalOddsRecord, { priceScale: 1 });
+    expect(forced.home).toBeCloseTo(milli.home, 12);
+    expect(forced.overround).toBeCloseTo(milli.overround / 1_000 - 0.999, 3);
+    expect(forced.overround).toBeLessThan(-0.99);
+  });
+
+  test("matches 1/x/2 and participant selection vocabularies", () => {
+    const result = impliedProbabilities({ fixtureId: 42, priceNames: ["1", "X", "2"], prices: [2.0, 3.4, 4.2] } as CanonicalOddsRecord);
+    expect(result.home).toBeGreaterThan(result.draw);
+    const participants = impliedProbabilities({ fixtureId: 42, priceNames: ["Participant 1", "Draw", "Participant 2"], prices: [2.0, 3.4, 4.2] } as CanonicalOddsRecord);
+    expect(participants.home).toBeCloseTo(result.home, 12);
+  });
+
+  test("scales home/draw/away from their own prices, ignoring an unrelated array entry's scale", () => {
+    // Regression for the wi-5 review bug: the milli-odds-vs-decimal decision
+    // was an array-wide "every(price >= 1_000)" over the *entire* raw prices
+    // array, not just the entries priceNames actually resolves to home,
+    // draw, or away. A record can carry extra positional entries (another
+    // market line, a combined/derived selection, or other metadata riding
+    // along in the same `prices` array) that don't map to a three-way
+    // outcome at all. If that extra entry's value happens to be small, the
+    // old "every" check would flip the *whole record's* scale to 1 even
+    // though the three relevant prices are unambiguous milli-odds.
+    //
+    // A uniformly-wrong scale cancels out of the home/draw/away *ratio*
+    // (dividing all three raw prices by the same wrong constant scale
+    // doesn't change how they compare to each other after normalizing to
+    // sum to 1) — so this bug does not change the returned home/draw/away
+    // numbers. It does silently corrupt `overround`, the documented
+    // pre-normalization bookmaker-margin field, by three orders of
+    // magnitude, which is what this test proves.
+    const mixed = {
+      fixtureId: 42,
+      priceNames: ["Home", "Draw", "Away", "Both Teams To Score"],
+      // Home/Draw/Away are unambiguous milli-odds (>= 1_000). The fourth
+      // entry is an unrelated selection this function doesn't read at all,
+      // whose own raw value happens to be well under 1_000.
+      prices: [1_850, 3_900, 4_750, 5],
+    } as CanonicalOddsRecord;
+    const result = impliedProbabilities(mixed);
+    expect(result.source).toBe("prices");
+    // Must match the known-good milli-odds decoding of the same three
+    // prices in isolation, not an array-wide-corrupted scale=1 reading.
+    const isolated = impliedProbabilities({ ...base, prices: [1_850, 3_900, 4_750] } as CanonicalOddsRecord);
+    expect(result.home).toBeCloseTo(isolated.home, 12);
+    expect(result.draw).toBeCloseTo(isolated.draw, 12);
+    expect(result.away).toBeCloseTo(isolated.away, 12);
+    expect(result.home + result.draw + result.away).toBeCloseTo(1, 12);
+    // The overround is where a wrong scale decision actually shows up.
+    expect(result.overround).toBeCloseTo(isolated.overround, 6);
+    expect(result.overround).toBeGreaterThan(0);
+    expect(result.overround).toBeLessThan(1);
+  });
+
+  test("raises ODDS_PROBABILITIES_UNAVAILABLE instead of guessing", () => {
+    expect(() => impliedProbabilities({ fixtureId: 42 } as CanonicalOddsRecord)).toThrow(expect.objectContaining({ code: "ODDS_PROBABILITIES_UNAVAILABLE" }));
+    expect(() => impliedProbabilities({ ...base } as CanonicalOddsRecord)).toThrow(expect.objectContaining({ code: "ODDS_PROBABILITIES_UNAVAILABLE" }));
+    expect(() => impliedProbabilities({ fixtureId: 42, priceNames: ["Over", "Under"], prices: [1.9, 1.9] } as CanonicalOddsRecord)).toThrow(expect.objectContaining({ code: "ODDS_PROBABILITIES_UNAVAILABLE" }));
+    expect(() => impliedProbabilities({ ...base, prices: [0, 0, 0] } as CanonicalOddsRecord)).toThrow(expect.objectContaining({ code: "ODDS_PROBABILITIES_UNAVAILABLE" }));
   });
 });
