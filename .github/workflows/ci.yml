@@ -45,7 +45,6 @@ jobs:
               - 'pnpm-workspace.yaml'
               - 'playwright.config.ts'
               - 'apps/learn/**'
-              - 'scripts/declared-port.mjs'
               - 'scripts/proof-report.mjs'
               - 'test/e2e/**'
             rust:
@@ -89,7 +88,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 24, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - run: echo "TXLINE_TEST_WEB_PORT=$(node scripts/declared-port.mjs txline-kit-test-web)" >> "$GITHUB_ENV"
+      - run: echo "TXLINE_TEST_WEB_PORT=58070" >> "$GITHUB_ENV"
       - uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright

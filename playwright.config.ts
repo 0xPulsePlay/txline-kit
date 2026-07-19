@@ -2,9 +2,9 @@ import { defineConfig, devices } from "@playwright/test";
 
 const proofOnly = process.env.PROOF_ONLY === "1";
 const externalBaseUrl = process.env.TXLINE_UAT_BASE_URL;
-const learnPort = Number(process.env.TXLINE_TEST_WEB_PORT);
+const learnPort = Number(process.env.TXLINE_TEST_WEB_PORT ?? 58_070);
 if (!proofOnly && !externalBaseUrl && (!Number.isInteger(learnPort) || learnPort < 1)) {
-  throw new Error("TXLINE_TEST_WEB_PORT is required; resolve txline-kit-test-web with port-for");
+  throw new Error("TXLINE_TEST_WEB_PORT must be a positive integer port");
 }
 const learnUrl = `http://127.0.0.1:${learnPort}`;
 const baseUrl = externalBaseUrl ?? learnUrl;

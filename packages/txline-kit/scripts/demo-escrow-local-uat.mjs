@@ -23,7 +23,7 @@ const fixtureId = 18_241_006;
 const finalSeq = 962;
 const rpcUrl = process.env.TXLINE_DEMO_RPC;
 const recordingPath = process.env.TXLINE_DEMO_RECORDING;
-if (!rpcUrl) throw new Error("TXLINE_DEMO_RPC is required; resolve the worktree test port with port-for");
+if (!rpcUrl) throw new Error("TXLINE_DEMO_RPC is required; point it at a local test validator RPC URL");
 if (!recordingPath) throw new Error("TXLINE_DEMO_RECORDING is required and must point to a protected .trec file");
 
 const programId = new PublicKey("AzfXDFdCyMY99KbcnhcqFud56SG2Xn9c88tGSzjtXQRS");
