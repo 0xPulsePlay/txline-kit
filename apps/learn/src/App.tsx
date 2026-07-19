@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { modules, replayFixtures, settlementSteps, type ReplayEvent } from "./data";
+import { Eyebrow, SparkMark } from "./Eyebrow";
+import { Production } from "./Production";
 
-type Screen = "overview" | "replay" | "strategy" | "proof" | "settlement" | "modules";
+type Screen = "overview" | "replay" | "strategy" | "proof" | "settlement" | "modules" | "production";
 const screens: Array<{ id: Screen; label: string; index: string }> = [
   { id: "overview", label: "Start here", index: "00" },
   { id: "replay", label: "Replay lab", index: "01" },
@@ -9,6 +11,7 @@ const screens: Array<{ id: Screen; label: string; index: string }> = [
   { id: "proof", label: "Proof anatomy", index: "03" },
   { id: "settlement", label: "Settlement", index: "04" },
   { id: "modules", label: "SDK map", index: "05" },
+  { id: "production", label: "Used in production", index: "06" },
 ];
 
 function useHashScreen(): [Screen, (screen: Screen) => void] {
@@ -23,14 +26,6 @@ function useHashScreen(): [Screen, (screen: Screen) => void] {
     return () => removeEventListener("hashchange", update);
   }, []);
   return [screen, (next) => { location.hash = next; setScreen(next); }];
-}
-
-function SparkMark({ tone = "cyan" }: { tone?: string }) {
-  return <span className={`spark spark--${tone}`} aria-hidden="true" />;
-}
-
-function Eyebrow({ children }: { children: React.ReactNode }) {
-  return <div className="eyebrow"><SparkMark />{children}</div>;
 }
 
 function Overview({ navigate }: { navigate: (screen: Screen) => void }) {
@@ -223,7 +218,7 @@ export function App() {
     <header className="topbar"><button className="brand" onClick={() => navigate("overview")} aria-label="TxLINE Kit home"><SparkMark /><strong>TxLINE</strong><span>kit</span></button><div className="network"><i /> MAINNET PROOF · PUBLIC SYNTHETIC DATA</div><a href="https://github.com/0xPulsePlay/txline-kit" target="_blank" rel="noreferrer">GitHub ↗</a></header>
     <div className="body-grid">
       <nav className="side-nav" aria-label="Learning screens">{screens.map((item) => <button key={item.id} aria-current={screen === item.id ? "page" : undefined} className={screen === item.id ? "active" : ""} onClick={() => navigate(item.id)}><span>{item.index}</span><strong>{item.label}</strong></button>)}</nav>
-      <main id="content">{screen === "overview" ? <Overview navigate={navigate} /> : screen === "replay" ? <ReplayLab /> : screen === "strategy" ? <StrategyStudio /> : screen === "proof" ? <ProofAnatomy /> : screen === "settlement" ? <SettlementReceipt /> : <ModuleMap />}</main>
+      <main id="content">{screen === "overview" ? <Overview navigate={navigate} /> : screen === "replay" ? <ReplayLab /> : screen === "strategy" ? <StrategyStudio /> : screen === "proof" ? <ProofAnatomy /> : screen === "settlement" ? <SettlementReceipt /> : screen === "modules" ? <ModuleMap /> : <Production />}</main>
     </div>
     <footer><span>MIT OR Apache-2.0</span><span>Hackathon demo · not audited · no valuable custody</span><span>Built for evidence, not screenshots</span></footer>
   </div>;
