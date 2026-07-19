@@ -63,6 +63,11 @@
       "import": "./dist/onchain.js",
       "require": "./dist/onchain.cjs"
     },
+    "./merkle": {
+      "types": "./dist/merkle.d.ts",
+      "import": "./dist/merkle.js",
+      "require": "./dist/merkle.cjs"
+    },
     "./strategy": {
       "types": "./dist/strategy.d.ts",
       "import": "./dist/strategy.js",
