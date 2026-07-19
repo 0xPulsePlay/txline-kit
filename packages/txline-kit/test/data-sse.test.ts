@@ -177,6 +177,47 @@ describe("implied probabilities", () => {
     expect(participants.home).toBeCloseTo(result.home, 12);
   });
 
+  test("scales home/draw/away from their own prices, ignoring an unrelated array entry's scale", () => {
+    // Regression for the wi-5 review bug: the milli-odds-vs-decimal decision
+    // was an array-wide "every(price >= 1_000)" over the *entire* raw prices
+    // array, not just the entries priceNames actually resolves to home,
+    // draw, or away. A record can carry extra positional entries (another
+    // market line, a combined/derived selection, or other metadata riding
+    // along in the same `prices` array) that don't map to a three-way
+    // outcome at all. If that extra entry's value happens to be small, the
+    // old "every" check would flip the *whole record's* scale to 1 even
+    // though the three relevant prices are unambiguous milli-odds.
+    //
+    // A uniformly-wrong scale cancels out of the home/draw/away *ratio*
+    // (dividing all three raw prices by the same wrong constant scale
+    // doesn't change how they compare to each other after normalizing to
+    // sum to 1) — so this bug does not change the returned home/draw/away
+    // numbers. It does silently corrupt `overround`, the documented
+    // pre-normalization bookmaker-margin field, by three orders of
+    // magnitude, which is what this test proves.
+    const mixed = {
+      fixtureId: 42,
+      priceNames: ["Home", "Draw", "Away", "Both Teams To Score"],
+      // Home/Draw/Away are unambiguous milli-odds (>= 1_000). The fourth
+      // entry is an unrelated selection this function doesn't read at all,
+      // whose own raw value happens to be well under 1_000.
+      prices: [1_850, 3_900, 4_750, 5],
+    } as CanonicalOddsRecord;
+    const result = impliedProbabilities(mixed);
+    expect(result.source).toBe("prices");
+    // Must match the known-good milli-odds decoding of the same three
+    // prices in isolation, not an array-wide-corrupted scale=1 reading.
+    const isolated = impliedProbabilities({ ...base, prices: [1_850, 3_900, 4_750] } as CanonicalOddsRecord);
+    expect(result.home).toBeCloseTo(isolated.home, 12);
+    expect(result.draw).toBeCloseTo(isolated.draw, 12);
+    expect(result.away).toBeCloseTo(isolated.away, 12);
+    expect(result.home + result.draw + result.away).toBeCloseTo(1, 12);
+    // The overround is where a wrong scale decision actually shows up.
+    expect(result.overround).toBeCloseTo(isolated.overround, 6);
+    expect(result.overround).toBeGreaterThan(0);
+    expect(result.overround).toBeLessThan(1);
+  });
+
   test("raises ODDS_PROBABILITIES_UNAVAILABLE instead of guessing", () => {
     expect(() => impliedProbabilities({ fixtureId: 42 } as CanonicalOddsRecord)).toThrow(expect.objectContaining({ code: "ODDS_PROBABILITIES_UNAVAILABLE" }));
     expect(() => impliedProbabilities({ ...base } as CanonicalOddsRecord)).toThrow(expect.objectContaining({ code: "ODDS_PROBABILITIES_UNAVAILABLE" }));

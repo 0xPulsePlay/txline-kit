@@ -46,6 +46,38 @@ describe("canonical journal", () => {
     expect(changed.headHash).not.toBe(forward.headHash);
   });
 
+  test("picks a deterministic survivor among true exact duplicates regardless of arrival order", async () => {
+    // Regression for the wi-4 review bug: exact.set(key, record) for the
+    // Map keyed by (identity, payloadHash) always kept "whichever record
+    // came last in the array". Two JournalRecord objects can share an
+    // identical payloadHash (same canonical payload content, e.g. the same
+    // update redelivered by the source) while still differing in
+    // receivedTimestamp, which is not part of the hash. Which one survived
+    // therefore depended on arrival order, violating the documented "same
+    // records in any arrival order -> same journal" guarantee down to the
+    // full record, not just headHash.
+    const payload = normalizeScoreRecord({ FixtureId: 42, Seq: 5, Ts: at + 5, Action: "goal" });
+    const early = await journalRecord("score", payload, at + 5); // first delivery
+    const late = await journalRecord("score", payload, at + 9_000); // redelivered later
+    expect(early.payloadHash).toBe(late.payloadHash);
+    expect(early.receivedTimestamp).not.toBe(late.receivedTimestamp);
+
+    const forward = await canonicalizeJournal([early, late, await score(1)]);
+    const reversed = await canonicalizeJournal([late, early, await score(1)]);
+    const shuffled = await canonicalizeJournal([await score(1), late, early]);
+
+    expect(forward.headHash).toBe(reversed.headHash);
+    expect(forward.headHash).toBe(shuffled.headHash);
+    // Not just the hash: the actual surviving record, receivedTimestamp
+    // included, must be identical no matter which arrival order produced it.
+    expect(forward.records).toEqual(reversed.records);
+    expect(forward.records).toEqual(shuffled.records);
+    const survivor = forward.records.find((record) => record.sourceId === "42:00000005");
+    // Deterministic tie-break: the earlier of the two receivedTimestamps wins.
+    expect(survivor?.receivedTimestamp).toBe(early.receivedTimestamp);
+    expect(forward.conflicts).toEqual([]); // same payloadHash -> not a conflict
+  });
+
   test("flags conflicting payloads observed under one source identity", async () => {
     const journal = await canonicalizeJournal([await score(3), await score(3, { StatusId: 4 })]);
     expect(journal.records).toHaveLength(2);

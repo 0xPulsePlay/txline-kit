@@ -124,7 +124,16 @@ function outcomeFor(name: string): "home" | "draw" | "away" | undefined {
  * inverted, treating uniformly large values (all >= 1000) as milli-odds —
  * TxLINE's consensus feed publishes decimal odds scaled by 1000. Pass
  * `priceScale` to bypass that heuristic. The triple is normalized to sum to
- * one and the pre-normalization margin is reported as `overround`. */
+ * one and the pre-normalization margin is reported as `overround`.
+ *
+ * The milli-odds-vs-decimal decision is made only from the price entries
+ * that actually resolve to home/draw/away via `priceNames`. `record.prices`
+ * can carry more entries than the three-way selections this function reads
+ * (extra market lines, combined/derived selections, or other bookmaker
+ * metadata riding in the same positional array) — folding those unrelated
+ * entries into an array-wide "every price >= 1000" check lets one
+ * differently-scaled, unrelated entry silently flip the scale for the
+ * three prices that matter. */
 export function impliedProbabilities(record: CanonicalOddsRecord, options: { priceScale?: number } = {}): ImpliedProbabilities {
   const names = record.priceNames;
   if (!names || names.length === 0) oddsFailure("Odds record carries no priceNames to identify outcomes", "Use a match-result odds record that names its selections (home/draw/away, participant 1/2, or 1/x/2).");
@@ -141,7 +150,10 @@ export function impliedProbabilities(record: CanonicalOddsRecord, options: { pri
   } else if (record.prices && record.prices.length > 0) {
     source = "prices";
     const prices = record.prices;
-    const scale = options.priceScale ?? (prices.every((price) => price >= 1_000) ? 1_000 : 1);
+    const outcomePrices = names
+      .map((name, index) => (outcomeFor(name) === undefined ? undefined : prices[index]))
+      .filter((price): price is number => typeof price === "number" && Number.isFinite(price));
+    const scale = options.priceScale ?? (outcomePrices.length > 0 && outcomePrices.every((price) => price >= 1_000) ? 1_000 : 1);
     names.forEach((name, index) => {
       const entry = prices[index];
       const outcome = outcomeFor(name);
