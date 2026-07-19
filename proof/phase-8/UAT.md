@@ -33,3 +33,13 @@ Source-release UAT will add public repository checks, tag/release receipts, and 
 7. Development remained protected by Cloudflare Access throughout.
 
 No unresolved Critical, High, or required-flow Medium defect remains in the public source release. npm and crates.io remain deliberately unpublished.
+
+## Production visual UAT addendum
+
+1. Clicked through Replay, Strategy, Proof, Settlement, and SDK Map journeys at four viewport sizes against the final public deployment.
+2. Audited all six screens at every viewport for serious/critical accessibility findings and document-level horizontal overflow.
+3. Captured and manually inspected 24 real product screenshots; no recursive proof-report screenshot is accepted as product evidence.
+4. Found and resolved clipped SDK orbit controls on mobile and tablet by switching those widths to a contained module grid.
+5. Found and resolved a tablet shell defect that collapsed the main content column to 74px.
+6. Found and resolved an 820px Overview min-content race by using a deliberate single-column tablet hero.
+7. Final production run: 12/12 Playwright scenarios PASS with no unresolved visual blocker.

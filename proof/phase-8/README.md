@@ -35,3 +35,13 @@ These are not claimed as complete. They require a future authenticated release a
 - Production is public HTTP 200; development remains HTTP 302 to Cloudflare Access; both app services, Caddy, and cloudflared are active.
 
 All non-registry Phase 8 requirements pass. The two operator-deferred registries remain the only intentionally unfinished items and are not represented as published.
+
+## World-ready production addendum
+
+- PR #12 merged the expanded visual UAT, responsive SDK-map containment, mobile deep-link navigation, proof-report correction, and change-scoped CI caching.
+- PR #13 resolved a production-only tablet min-content overflow without weakening the 820px overflow assertion; browser and Node CI passed while untouched Rust/Solana CI correctly skipped.
+- Final deployed artifact: `98ea21e-20260719T063220Z`.
+- Production UAT against `https://txline-kit.claude.do` passed all 12 scenarios: full interaction journeys, six-screen accessibility/overflow checks, and screenshot capture across desktop, laptop, tablet, and mobile.
+- All 24 product screenshots were manually inspected for clipping, overlap, alignment, contrast, containment, and visual hierarchy.
+- Phase 8 report generation excludes the four obsolete self-referential report-renderer images and includes only named product-screen evidence.
+- Production remains HTTP 200; development remains HTTP 302 to Cloudflare Access; app services, Caddy, and cloudflared are active.
