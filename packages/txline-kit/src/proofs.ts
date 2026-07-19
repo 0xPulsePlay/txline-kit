@@ -243,6 +243,51 @@ export async function waitForProofAvailability<T>(fetchProof: () => Promise<T>, 
   }
 }
 
+export interface OddsProofOptions {
+  messageId: string;
+  /** Timestamp of the odds message the proof should cover (milliseconds). */
+  timestamp: number;
+  /** Route-drift override: TxLINE has renamed proof endpoints before, so the
+   * path is configurable without touching consumers. */
+  path?: string;
+  retry?: ProofRetryPolicy | true;
+}
+
+/** EXPERIMENTAL: the odds-proof wire shape is not yet confirmed against the
+ * live `daily_batch_roots` accounts, so known fields are decoded when present
+ * and the untouched response is always preserved in `raw`. */
+export interface ExperimentalOddsProof {
+  messageId: string;
+  requestedTimestamp: number;
+  raw: Record<string, unknown>;
+  oddsSubTreeProof?: readonly ProofNode[];
+  mainTreeProof?: readonly ProofNode[];
+  batchRoot?: Bytes32;
+}
+
+const DEFAULT_ODDS_PROOF_PATH = "/odds/validation";
+
+function optionalNodes(value: unknown, path: string): readonly ProofNode[] | undefined {
+  return Array.isArray(value) ? nodes(value, path) : undefined;
+}
+
+export function normalizeOddsProof(rawValue: unknown, request: OddsProofOptions): ExperimentalOddsProof {
+  const value = rawRecord.safeParse(rawValue);
+  if (!value.success) proofFailure("Odds proof response must be an object", "ODDS_PROOF_RESPONSE_INVALID", "Inspect the endpoint path (route drift) and provider response; the odds proof surface is experimental.", value.error);
+  const source = value.data;
+  const subTree = optionalNodes(source.oddsSubTreeProof ?? source.subTreeProof, "oddsSubTreeProof");
+  const mainTree = optionalNodes(source.mainTreeProof, "mainTreeProof");
+  const rootRaw = source.batchRoot ?? source.mainTreeRoot;
+  return Object.freeze({
+    messageId: request.messageId,
+    requestedTimestamp: request.timestamp,
+    raw: source,
+    ...(subTree ? { oddsSubTreeProof: subTree } : {}),
+    ...(mainTree ? { mainTreeProof: mainTree } : {}),
+    ...(rootRaw === undefined ? {} : { batchRoot: decodeBytes32(rootRaw, "batchRoot") }),
+  });
+}
+
 /**
  * Merge a top-level AbortSignal into a proof retry policy. The signal takes
  * effect both between retry attempts (checked in waitForProofAvailability's
@@ -273,6 +318,56 @@ export class ProofClient {
         proofFailure("Score proof endpoint did not return valid JSON", "PROOF_JSON_INVALID", "Inspect provider availability and the selected replay or network host.", cause);
       }
       return normalizeProofBundle(raw, options);
+    };
+    if (options.retry === undefined) return once();
+    return waitForProofAvailability(once, options.retry === true ? {} : options.retry);
+  }
+
+  /** EXPERIMENTAL odds-checkpoint proof fetch. The response shape is decoded
+   * permissively (see ExperimentalOddsProof); validate against a live
+   * `daily_batch_roots` account before relying on it for settlement. */
+  async fetchOdds(options: OddsProofOptions): Promise<ExperimentalOddsProof> {
+    if (typeof options.messageId !== "string" || options.messageId.length === 0) proofFailure("messageId must be a non-empty string", "ODDS_PROOF_MESSAGE_ID_INVALID", "Pass MessageId from a canonical odds record.");
+    if (!Number.isSafeInteger(options.timestamp) || options.timestamp < 0) proofFailure("timestamp must be a non-negative integer in milliseconds", "ODDS_PROOF_TIMESTAMP_INVALID", "Pass the odds record's millisecond timestamp.");
+    // `path` is a same-origin-relative route-drift override, not a fetch
+    // destination. HttpPipeline.apiUrl passes through any absolute
+    // (http(s)://) or scheme-relative (//host/...) path UNCHANGED and the
+    // request pipeline still attaches the live JWT + X-Api-Token headers
+    // regardless of destination -- so an absolute path here would send an
+    // authenticated request to an arbitrary origin. Reject before it ever
+    // reaches this.http.request(...).
+    //
+    // Type check FIRST: a non-string `path` (e.g. an array like
+    // `["https://evil.example/steal"]`) skips a `typeof === "string"`-gated
+    // regex check entirely, then gets template-literal-coerced to the
+    // malicious string at the fetch call site below (a single-element array
+    // stringifies via Array.prototype.toString with no separator, producing
+    // exactly the absolute URL). So validate the type before ever touching
+    // the string-content checks.
+    if (options.path !== undefined && typeof options.path !== "string") {
+      proofFailure(
+        "fetchOdds path must be a string when provided",
+        "ODDS_PROOF_PATH_INVALID",
+        "Pass a relative route such as \"/odds/validation\" as a string; non-string values (arrays, objects) can coerce to an absolute URL at the request call site.",
+      );
+    }
+    if (typeof options.path === "string" && (/^https?:\/\//i.test(options.path) || options.path.startsWith("//"))) {
+      proofFailure(
+        `fetchOdds path must be a same-origin-relative route, not an absolute or scheme-relative URL (received ${options.path})`,
+        "ODDS_PROOF_PATH_INVALID",
+        "Pass a relative route such as \"/odds/validation\"; absolute or scheme-relative paths would send the authenticated request to an arbitrary origin.",
+      );
+    }
+    const retrySignal = options.retry && options.retry !== true ? options.retry.signal : undefined;
+    const once = async (): Promise<ExperimentalOddsProof> => {
+      const query = new URLSearchParams({ messageId: options.messageId, timestamp: String(options.timestamp) });
+      const response = await this.http.request(`${options.path ?? DEFAULT_ODDS_PROOF_PATH}?${query}`, retrySignal ? { signal: retrySignal } : {});
+      await this.http.expectOk(response, "odds proof");
+      let raw: unknown;
+      try { raw = await response.json(); } catch (cause) {
+        proofFailure("Odds proof endpoint did not return valid JSON", "ODDS_PROOF_JSON_INVALID", "Inspect provider availability and the configured odds proof path.", cause);
+      }
+      return normalizeOddsProof(raw, options);
     };
     if (options.retry === undefined) return once();
     return waitForProofAvailability(once, options.retry === true ? {} : options.retry);

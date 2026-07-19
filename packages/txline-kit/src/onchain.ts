@@ -72,6 +72,15 @@ export function deriveRootPda(input: { namespace: RootNamespace; timestamp: numb
   return PublicKey.findProgramAddressSync([encoder.encode(input.namespace), u16DaySeed(bucket)], input.programId)[0];
 }
 
+/** Root account for odds-batch proofs (`daily_batch_roots`), the counterpart
+ * of `dailyScoresPda` for the experimental odds proof surface. Accepts
+ * milliseconds or seconds (healed via `healTimestampMillis`), and — like
+ * `deriveRootPda` — a `Date` instance or explicit `timestampUnit` bypasses
+ * the seconds-vs-milliseconds heuristic entirely. */
+export function oddsBatchRootPda(timestamp: number | Date, programId: PublicKey, timestampUnit?: TimestampUnit): PublicKey {
+  return deriveRootPda({ namespace: "daily_batch_roots", timestamp, programId, ...(timestampUnit === undefined ? {} : { timestampUnit }) });
+}
+
 export interface DailyScoresPdaOptions {
   /**
    * When true, reject a raw-number timestamp that looks like it's in

