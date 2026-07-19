@@ -1,6 +1,9 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
+const screens = ["overview", "replay", "strategy", "proof", "settlement", "modules"];
+const visualProofPhase = process.env.VISUAL_PROOF_PHASE ?? "7";
+
 test("learning app supports replay, strategy, proof, settlement, and module journeys", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /See the match/i })).toBeVisible();
@@ -39,24 +42,37 @@ test("learning app supports replay, strategy, proof, settlement, and module jour
 });
 
 test("learning app has no serious accessibility violations or horizontal overflow", async ({ page }) => {
-  await page.goto("/#overview");
-  await page.waitForTimeout(550);
-  const audit = await new AxeBuilder({ page }).analyze();
-  expect(audit.violations.filter(({ impact }) => impact === "critical" || impact === "serious")).toEqual([]);
-  const width = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
-  expect(width.scroll).toBeLessThanOrEqual(width.client);
+  for (const screen of screens) {
+    await page.goto(`/#${screen}`);
+    await page.waitForTimeout(550);
+    const audit = await new AxeBuilder({ page }).analyze();
+    expect(audit.violations.filter(({ impact }) => impact === "critical" || impact === "serious"), `${screen} accessibility`).toEqual([]);
+    const width = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
+    expect(width.scroll, `${screen} horizontal overflow`).toBeLessThanOrEqual(width.client);
+  }
 });
 
 test("captures the Phase 7 visual proof matrix", async ({ page }, testInfo) => {
-  const screens = testInfo.project.name === "desktop"
-    ? ["overview", "replay", "strategy", "proof", "settlement", "modules"]
-    : ["overview"];
   for (const screen of screens) {
     await page.goto(`/#${screen}`);
     await expect(page.locator("main .screen")).toBeVisible();
     await page.waitForTimeout(550);
+    await expect(page.locator(".side-nav .active")).toBeInViewport();
+    if (screen === "modules") {
+      const clipped = await page.locator(".module-map").evaluate((map) => {
+        const bounds = map.getBoundingClientRect();
+        const tolerance = 1;
+        return [...map.querySelectorAll(":scope > button")].flatMap((button) => {
+          const item = button.getBoundingClientRect();
+          const contained = item.left >= bounds.left - tolerance && item.right <= bounds.right + tolerance
+            && item.top >= bounds.top - tolerance && item.bottom <= bounds.bottom + tolerance;
+          return contained ? [] : [{ label: button.textContent?.trim(), map: bounds.toJSON(), item: item.toJSON() }];
+        });
+      });
+      expect(clipped, "SDK module controls are not clipped").toEqual([]);
+    }
     await page.screenshot({
-      path: `proof/phase-7/screenshots/${testInfo.project.name}-${screen}.png`,
+      path: `proof/phase-${visualProofPhase}/screenshots/${testInfo.project.name}-${screen}.png`,
       fullPage: true,
     });
   }
