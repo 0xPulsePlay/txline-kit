@@ -269,10 +269,24 @@ describe("root PDA namespaces and timestamp healing", () => {
     expect(deriveRootPda({ namespace: "daily_scores_roots", timestamp: seconds, programId }).toBase58()).toBe(dailyScoresPda(millis, programId).toBase58());
   });
 
-  test("dailyScoresPda rejects seconds-unit inputs that previously derived a wrong PDA silently", () => {
-    expect(() => dailyScoresPda(seconds, programId)).toThrow(expect.objectContaining({ code: "PDA_TIMESTAMP_UNIT_SUSPECT" }));
+  test("dailyScoresPda({ strict: true }) rejects seconds-unit inputs that would otherwise derive a wrong PDA silently", () => {
+    expect(() => dailyScoresPda(seconds, programId, { strict: true })).toThrow(expect.objectContaining({ code: "PDA_TIMESTAMP_UNIT_SUSPECT" }));
     expect(() => dailyScoresPda(-1, programId)).toThrow(expect.objectContaining({ code: "PDA_TIMESTAMP_INVALID" }));
     expect(dailyScoresPda(0, programId).toBase58()).toBe(expected("daily_scores_roots", 0));
+  });
+
+  test("dailyScoresPda defaults to strict:false, reproducing v0.1.0's silent seconds-unit behavior byte-for-byte", () => {
+    // v0.1.0 had no unit check at all: it took the raw number as-is and
+    // derived whatever (wrong, but non-throwing) PDA that implied. The
+    // default here (options omitted, and options.strict omitted) must
+    // reproduce that exact result so existing v0.1.0 callers upgrading with
+    // no code changes get the identical PDA they got before.
+    const wrongDay = Math.floor(seconds / 86_400_000);
+    const wrongExpected = expected("daily_scores_roots", wrongDay);
+    expect(() => dailyScoresPda(seconds, programId)).not.toThrow();
+    expect(dailyScoresPda(seconds, programId).toBase58()).toBe(wrongExpected);
+    expect(dailyScoresPda(seconds, programId, {}).toBase58()).toBe(wrongExpected);
+    expect(dailyScoresPda(seconds, programId, { strict: false }).toBase58()).toBe(wrongExpected);
   });
 
   test("guards namespace names and u16 seed overflow", () => {
@@ -314,12 +328,16 @@ describe("root PDA namespaces and timestamp healing", () => {
       expect(healTimestampMillis(millis)).toBe(millis);
     });
 
-    test("dailyScoresPda derives directly from a Date's getTime() instead of throwing PDA_TIMESTAMP_UNIT_SUSPECT", () => {
+    test("dailyScoresPda derives directly from a Date's getTime(), never throwing PDA_TIMESTAMP_UNIT_SUSPECT even under strict:true", () => {
       const epochDay = Math.floor(smallMillis / 86_400_000);
       expect(dailyScoresPda(new Date(smallMillis), programId).toBase58()).toBe(expected("daily_scores_roots", epochDay));
-      // The same value as a raw number remains ambiguous and still throws —
-      // proving dailyScoresPda's Date handling, not its safety check, changed.
-      expect(() => dailyScoresPda(smallMillis, programId)).toThrow(expect.objectContaining({ code: "PDA_TIMESTAMP_UNIT_SUSPECT" }));
+      expect(dailyScoresPda(new Date(smallMillis), programId, { strict: true }).toBase58()).toBe(expected("daily_scores_roots", epochDay));
+      // The same value as a raw number remains ambiguous and, under
+      // strict:true, still throws — proving dailyScoresPda's Date handling,
+      // not its safety check, changed.
+      expect(() => dailyScoresPda(smallMillis, programId, { strict: true })).toThrow(expect.objectContaining({ code: "PDA_TIMESTAMP_UNIT_SUSPECT" }));
+      // Without strict, the raw number is silently healed the old way.
+      expect(() => dailyScoresPda(smallMillis, programId)).not.toThrow();
     });
 
     test("deriveRootPda accepts a Date and an explicit timestampUnit override without misclassifying small values", () => {

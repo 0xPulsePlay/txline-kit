@@ -72,15 +72,30 @@ export function deriveRootPda(input: { namespace: RootNamespace; timestamp: numb
   return PublicKey.findProgramAddressSync([encoder.encode(input.namespace), u16DaySeed(bucket)], input.programId)[0];
 }
 
+export interface DailyScoresPdaOptions {
+  /**
+   * When true, reject a raw-number timestamp that looks like it's in
+   * seconds (see `SECONDS_SUSPECT_BOUND`) with `PDA_TIMESTAMP_UNIT_SUSPECT`
+   * instead of silently deriving a PDA from the wrong day. Defaults to
+   * `false`, matching v0.1.0's original behavior exactly (compute the PDA
+   * from the timestamp as given, never throwing on unit ambiguity) so that
+   * existing v0.1.0 callers upgrading with no code changes keep their exact
+   * prior results. Opt in to the safety check with `strict: true`, or use
+   * `deriveRootPda`, which always heals seconds inputs instead of throwing.
+   */
+  strict?: boolean;
+}
+
 /** Derive the daily scores root PDA. A `Date` instance is unambiguous
  * milliseconds by construction, so it always bypasses the seconds-suspect
  * check below — only a raw `number` (which could plausibly have arrived as
- * seconds from an external API) is checked against the heuristic bound. */
-export function dailyScoresPda(timestamp: number | Date, programId: PublicKey): PublicKey {
+ * seconds from an external API) is checked against the heuristic bound, and
+ * only when `options.strict` is true. */
+export function dailyScoresPda(timestamp: number | Date, programId: PublicKey, options: DailyScoresPdaOptions = {}): PublicKey {
   const isDate = timestamp instanceof Date;
   const millis = isDate ? timestamp.getTime() : timestamp;
   if (!Number.isSafeInteger(millis) || millis < 0) verificationFailure("Daily score PDA timestamp must be a non-negative integer in milliseconds", "PDA_TIMESTAMP_INVALID", "Use bundle.summary.updateStats.minTimestamp without converting it to seconds.");
-  if (!isDate && millis > 0 && millis < SECONDS_SUSPECT_BOUND) {
+  if (options.strict && !isDate && millis > 0 && millis < SECONDS_SUSPECT_BOUND) {
     verificationFailure(`Timestamp ${millis} appears to be in seconds; a wrong PDA would be derived`, "PDA_TIMESTAMP_UNIT_SUSPECT", "Pass milliseconds (bundle.summary.updateStats.minTimestamp is already milliseconds), or use deriveRootPda, which heals seconds inputs.");
   }
   const epochDay = Math.floor(millis / DAY_MILLIS);
