@@ -218,6 +218,31 @@ describe("proof availability retry", () => {
     await expect(proofs.fetch({ fixtureId: 1, seq: 1, statKeys: [1] })).rejects.toMatchObject({ status: 404 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  test("ProofClient.forFinal aborts the proof-availability wait promptly instead of exhausting the retry budget", async () => {
+    // Regression for the wi-1 review bug: forFinal only threaded its top-level
+    // AbortSignal into data.awaitFinal, never into the retry policy handed to
+    // waitForProofAvailability, so aborting mid-wait had no effect on the
+    // proof retry loop and callers had to wait out the full timeout.
+    const fetchMock = vi.fn(async () => new Response("not anchored", { status: 404 }));
+    const http = new HttpPipeline(resolveClientConfig({ network: "mainnet", baseUrl: "http://replay.test", fetch: fetchMock }));
+    const data = { awaitFinal: vi.fn(async () => ({ seq: 400 })) } as unknown as DataClient;
+    const proofs = new ProofClient(http, data);
+    const controller = new AbortController();
+    // A large retry budget: if the abort signal is not honored, this would
+    // only reject after ~5 minutes (or never, in this mocked test run).
+    const waiting = proofs.forFinal(18_241_006, {
+      signal: controller.signal,
+      retry: { initialDelayMs: 60_000, maximumDelayMs: 60_000, timeoutMs: 300_000 },
+    });
+    const started = Date.now();
+    queueMicrotask(() => controller.abort(new Error("caller stop")));
+    await expect(waiting).rejects.toThrow("caller stop");
+    expect(Date.now() - started).toBeLessThan(2_000);
+    // Only the initial attempt (if any) should have fired before the abort
+    // short-circuited the backoff wait; it must not have retried repeatedly.
+    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(1);
+  });
 });
 
 describe("root PDA namespaces and timestamp healing", () => {
