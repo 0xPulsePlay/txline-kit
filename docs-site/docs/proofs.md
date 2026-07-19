@@ -20,7 +20,9 @@ TxLINE anchors daily roots on a delay after each five-minute interval closes.
 A proof requested at the moment of finalisation can 404 even though it will
 exist seconds later. Pass `retry: true` (or a policy) and the fetch rides out
 the pending statuses (404/409/425) with bounded exponential backoff;
-exhaustion raises `PROOF_AVAILABILITY_TIMEOUT`. The keeper waits by default.
+exhaustion raises `PROOF_AVAILABILITY_TIMEOUT`. The keeper keeps the v0.1.0
+single-attempt, fail-fast default; pass `proofRetry: true` (or an explicit
+policy object) to opt in to the bounded wait.
 
 ## Odds proofs (experimental)
 
