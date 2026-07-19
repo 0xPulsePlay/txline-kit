@@ -55,29 +55,58 @@ function freeze<T>(attestation: ProofAttestation<T>): ProofAttestation<T> {
   return Object.freeze({ ...attestation, anchors: Object.freeze(attestation.anchors.map((anchor) => Object.freeze({ ...anchor }))) });
 }
 
+/**
+ * Recursively freeze a value's own nested objects/arrays. Object.freeze is
+ * shallow, so freezing only the outer attestation container leaves any
+ * nested plain object or array of the cloned subject still mutable in
+ * place. Safe for the shapes cloneSubject actually produces (the
+ * JSON.parse output of a canonical-JSON round-trip: plain objects, arrays,
+ * strings, numbers, booleans, null -- nothing else can appear), so a
+ * simple own-enumerable-property walk is sufficient.
+ */
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const key of Object.keys(value as Record<string, unknown>)) {
+      deepFreeze((value as Record<string, unknown>)[key]);
+    }
+  }
+  return value;
+}
+
 /** Deep-clone a subject via a canonical-JSON round-trip before it's stored
- * on a frozen attestation. Object.freeze on the attestation container is
- * shallow -- the referenced subject object itself is never cloned or
- * deep-frozen by `freeze()` alone. Without this, a caller mutating the same
- * object it passed in would make the "frozen" record's exposed `.subject`
- * reflect the mutation while `.contentHash` still attested to the
- * pre-mutation bytes. hashCanonical already requires the subject to be
- * canonical-JSON-safe, so this round-trip is a safe, faithful clone. */
+ * on a frozen attestation, then recursively freeze the clone. Object.freeze
+ * on the attestation container is shallow -- without a deep freeze here,
+ * the returned `.subject` would still be a plain, mutable object, so
+ * anyone holding the ATTESTATION (not just the caller's original object)
+ * could mutate `attestation.subject.foo = "x"` directly and silently
+ * desync it from `contentHash`, with no revalidation on read.
+ * hashCanonical already requires the subject to be canonical-JSON-safe, so
+ * this round-trip is a safe, faithful clone. */
 function cloneSubject<T>(subject: T): T {
-  return JSON.parse(canonicalStringify(subject)) as T;
+  return deepFreeze(JSON.parse(canonicalStringify(subject)) as T);
 }
 
 /** A live, single-client view: expressive, possibly incomplete or reordered. */
 export async function observeAttestation<T>(subject: T): Promise<ProofAttestation<T>> {
-  const contentHash = await hashCanonical(subject);
-  return freeze({ state: "observed", subject: cloneSubject(subject), contentHash, coverage: "none", anchors: [] });
+  // Clone FIRST (synchronously, no `await` in between reading `subject` and
+  // cloning it), then hash the CLONE, not the caller's original object.
+  // Hashing the original before cloning left a narrow TOCTOU window: a
+  // caller who mutates their original object synchronously, before this
+  // clone is taken, could desync the eventual hash from the clone that
+  // actually gets stored.
+  const clonedSubject = cloneSubject(subject);
+  const contentHash = await hashCanonical(clonedSubject);
+  return freeze({ state: "observed", subject: clonedSubject, contentHash, coverage: "none", anchors: [] });
 }
 
 /** Content everyone agrees on, proofs still pending. Conflicts quarantine
  * immediately — one source identity with diverging payloads must never seal. */
 export async function canonicalAttestation<T>(subject: T, conflicts: readonly JournalConflict[] = []): Promise<ProofAttestation<T>> {
-  const contentHash = await hashCanonical(subject);
+  // Same clone-before-hash ordering as observeAttestation, for the same
+  // TOCTOU reason.
   const clonedSubject = cloneSubject(subject);
+  const contentHash = await hashCanonical(clonedSubject);
   if (conflicts.length > 0) {
     return freeze({
       state: "quarantined",
