@@ -54,6 +54,83 @@ describe("proof lifecycle", () => {
     expect(clean.state).toBe("canonical");
   });
 
+  test("refuses to seal content mutated after canonicalization", async () => {
+    // Regression for the wi-3 review bug (a): sealAttestation trusted the
+    // contentHash recorded at canonicalization time without ever rehashing
+    // the live subject, so mutating the (shallowly-frozen-wrapper-only,
+    // deep-mutable) subject object between canonicalAttestation and
+    // sealAttestation silently sealed a record whose contentHash no longer
+    // matched its actual content.
+    const mutableSubject = { fixtureId: 42, headHash: "0xabc" };
+    const canonical = await canonicalAttestation(mutableSubject);
+    mutableSubject.headHash = "0xtampered";
+    await expect(sealAttestation(canonical, [anchor("aaaaaaaa", 1)])).rejects.toMatchObject({ code: "LIFECYCLE_CONTENT_MUTATED" });
+    // Restoring the original content makes it sealable again.
+    mutableSubject.headHash = "0xabc";
+    await expect(sealAttestation(canonical, [anchor("aaaaaaaa", 1)])).resolves.toMatchObject({ state: "verified" });
+  });
+
+  test("snapshots anchors at seal time so the stored record can't disagree with what was hashed", async () => {
+    // Regression for the wi-3 review bug (b). Note first: the pre-existing
+    // `freeze()` helper already clones each anchor via `{ ...anchor }`
+    // before freezing, so mutating a caller's anchor object *after*
+    // sealAttestation has already returned was never actually able to
+    // corrupt the result — that specific timing doesn't reproduce a bug.
+    //
+    // The real gap was internal: sealAttestation read the live `anchors`
+    // objects directly at three different points while computing
+    // proofFingerprint and sealedHash, and only cloned them into the
+    // returned attestation at the very end (inside freeze()). If the
+    // underlying anchor value changed between those reads — e.g. a caller
+    // mutating a shared anchor object from a callback that fires while one
+    // of sealAttestation's `await hashCanonical(...)` calls is pending —
+    // the hashes and the stored anchors could each capture a different
+    // value, so the returned record would no longer accurately describe
+    // what its own sealedHash commits to.
+    //
+    // A getter deterministically reproduces this without depending on real
+    // async scheduling: it returns one value for the first two reads (what
+    // proofFingerprint's map and sealedHash's canonicalStringify would see)
+    // and a different value from the third read onward (what the old
+    // code's final `{ ...anchor }` clone inside freeze() would capture).
+    let reads = 0;
+    const flaky: ProofAnchor = {
+      sourceId: "flaky",
+      sourceTimestamp: 1,
+      get rootHash() {
+        reads += 1;
+        return reads <= 2 ? "0xhashed-value" : "0xchanged-after-hashing";
+      },
+    };
+    const canonical = await canonicalAttestation(subject);
+    const sealed = await sealAttestation(canonical, [flaky]);
+    // The stored anchor must reflect the same single read used for hashing,
+    // never a later, different read of the same live object.
+    expect(sealed.anchors[0]!.rootHash).toBe("0xhashed-value");
+    expect(sealed.anchors[0]!.rootHash).not.toBe("0xchanged-after-hashing");
+    expect(Object.isFrozen(sealed.anchors[0])).toBe(true);
+    expect(() => { (sealed.anchors[0] as { rootHash: string }).rootHash = "0xshouldfail"; }).toThrow();
+  });
+
+  test("breaks anchor sort ties deterministically regardless of input order", async () => {
+    // Regression for the wi-3 review bug (c): the sort comparator only
+    // compared sourceTimestamp then sourceId. Two anchors tying on both
+    // (same PDA/day identity and timestamp, different rootHash — e.g. two
+    // observations of the same account that disagree) fell back to
+    // Array#sort's *stable* behavior, which preserves input order — so the
+    // same logical anchor set produced a different sealedHash depending on
+    // which order the caller happened to list them in.
+    const canonical = await canonicalAttestation(subject);
+    const tiedA: ProofAnchor = { sourceId: "shared", sourceTimestamp: 100, rootHash: "0xaaaa" };
+    const tiedB: ProofAnchor = { sourceId: "shared", sourceTimestamp: 100, rootHash: "0xbbbb" };
+    const forward = await sealAttestation(canonical, [tiedA, tiedB]);
+    const reversed = await sealAttestation(canonical, [tiedB, tiedA]);
+    expect(forward.sealedHash).toBe(reversed.sealedHash);
+    expect(forward.anchors.map((a) => a.rootHash)).toEqual(reversed.anchors.map((a) => a.rootHash));
+    // The deterministic tie-break (rootHash ascending) is what decides order.
+    expect(forward.anchors.map((a) => a.rootHash)).toEqual(["0xaaaa", "0xbbbb"]);
+  });
+
   test("guards transitions and manual quarantine strips seals", async () => {
     const observed = await observeAttestation(subject);
     await expect(sealAttestation(observed, [anchor("aaaaaaaa", 1)])).rejects.toMatchObject({ code: "LIFECYCLE_TRANSITION_INVALID" });
