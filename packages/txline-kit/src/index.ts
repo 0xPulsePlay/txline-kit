@@ -6,5 +6,6 @@ export type * from "./proofs.js";
 export type * from "./onchain.js";
 export * from "./merkle.js";
 export * from "./journal.js";
+export * from "./lifecycle.js";
 export * from "./strategy.js";
 export * from "./keeper.js";
