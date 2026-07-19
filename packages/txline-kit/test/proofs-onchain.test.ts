@@ -177,6 +177,25 @@ describe("proof availability retry", () => {
       .rejects.toMatchObject({ code: "PROOF_AVAILABILITY_TIMEOUT" });
   });
 
+  test("caps the backoff sleep to the remaining timeout budget so elapsed time never overshoots timeoutMs", async () => {
+    // Regression: the deadline was previously only checked BEFORE sleeping,
+    // then the full computed backoff `delay` always elapsed regardless of
+    // how close to the deadline it was -- so wall-clock time could overshoot
+    // the advertised timeoutMs by up to one full backoff interval. With
+    // initialDelayMs=1000, multiplier=2, timeoutMs=1500: the first sleep is
+    // capped to min(1000, 1500)=1000 (elapsed 0 -> 1000); the second would
+    // naturally be 2000ms of backoff, but only 500ms remains until the
+    // 1500ms deadline, so it must be capped to 500 (elapsed 1000 -> 1500),
+    // at which point the timeout fires exactly at the advertised budget
+    // instead of overshooting to 3000ms.
+    const clock = manualClock();
+    const fetchProof = vi.fn(async () => { throw pending(404); });
+    await expect(waitForProofAvailability(fetchProof, { ...clock.policy, initialDelayMs: 1_000, multiplier: 2, maximumDelayMs: 8_000, timeoutMs: 1_500 }))
+      .rejects.toMatchObject({ code: "PROOF_AVAILABILITY_TIMEOUT" });
+    expect(clock.sleeps).toEqual([1_000, 500]);
+    expect(clock.sleeps.reduce((sum, ms) => sum + ms, 0)).toBeLessThanOrEqual(1_500);
+  });
+
   test("propagates non-pending failures immediately and validates the policy", async () => {
     const boom = new HttpError("score stat proof failed with HTTP 500", { code: "HTTP_STATUS", fix: "retry", status: 500 });
     const fetchProof = vi.fn(async () => { throw boom; });
@@ -499,5 +518,27 @@ describe("experimental odds proofs", () => {
     await expect(proofs.fetchOdds({ ...request, path: "/odds/proof-v2" })).resolves.toMatchObject({ messageId: request.messageId });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0]![0])).toContain("/odds/proof-v2?");
+  });
+
+  test("rejects a non-string override path before any request fires (H2-residual: type-coercion bypass)", async () => {
+    // Regression for the H2-residual review bug: the original H2 guard was
+    // gated on `typeof options.path === "string"`, so a non-string `path`
+    // (e.g. a single-element array) skipped the regex check entirely, then
+    // got coerced to a plain string by the template literal at the fetch
+    // call site (`${options.path ?? DEFAULT_ODDS_PROOF_PATH}?${query}`).
+    // A single-element array stringifies via Array.prototype.toString with
+    // no separator, so `["https://evil.example/steal"]` coerces to exactly
+    // "https://evil.example/steal" -- the same credential-exfiltration
+    // vector H2 was meant to close, just via a different input shape.
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({}), { status: 200 }));
+    const http = new HttpPipeline(resolveClientConfig({ network: "mainnet", baseUrl: "http://replay.test", fetch: fetchMock }));
+    const proofs = new ProofClient(http, {} as unknown as DataClient);
+
+    await expect(proofs.fetchOdds({ ...request, path: ["https://evil.example/steal"] as unknown as string }))
+      .rejects.toMatchObject({ code: "ODDS_PROOF_PATH_INVALID" });
+    await expect(proofs.fetchOdds({ ...request, path: { toString: () => "https://evil.example/steal" } as unknown as string }))
+      .rejects.toMatchObject({ code: "ODDS_PROOF_PATH_INVALID" });
+    // Confirm no request was ever dispatched for either rejected shape.
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
