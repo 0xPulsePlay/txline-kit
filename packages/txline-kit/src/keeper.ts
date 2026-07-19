@@ -21,11 +21,16 @@ export interface PrepareSettlementOptions {
   signal?: AbortSignal;
   /**
    * Proof-availability retry for the settlement proof fetch. TxLINE anchors
-   * daily roots on a delay after each interval closes, so the keeper waits
-   * (bounded, three minutes by default) instead of failing on the first 404.
-   * Pass false to restore the previous single-attempt behavior.
+   * daily roots on a delay after each interval closes, so the underlying
+   * proof fetch can 404 briefly after the interval closes.
+   *
+   * Defaults to the single-attempt, fail-fast behavior (no retry) when
+   * omitted entirely, matching the original v0.1.0 contract. Pass `true` to
+   * opt in to the bounded wait (three minutes by default), or an explicit
+   * `ProofRetryPolicy` to tune it. Pass `false` to be explicit about
+   * single-attempt behavior.
    */
-  proofRetry?: ProofRetryPolicy | false;
+  proofRetry?: ProofRetryPolicy | boolean;
 }
 
 export interface WatchAndSettleOptions extends PrepareSettlementOptions {
@@ -62,6 +67,19 @@ function finalSeq(record: CanonicalScoreRecord): number {
   return record.seq!;
 }
 
+/**
+ * Resolve the caller's `proofRetry` option into the `ProofRetryPolicy` (if
+ * any) to hand to `ProofClient.fetch`. Omitted or `false` means single
+ * attempt (undefined -- no retry key sent at all), matching v0.1.0's
+ * fail-fast contract. `true` opts in to the default bounded wait; an
+ * explicit policy object opts in and overrides the defaults it sets.
+ */
+function resolveProofRetry(proofRetry: ProofRetryPolicy | boolean | undefined, signal: AbortSignal | undefined): ProofRetryPolicy | undefined {
+  if (proofRetry === undefined || proofRetry === false) return undefined;
+  const defaults: ProofRetryPolicy = { timeoutMs: 180_000, ...(signal ? { signal } : {}) };
+  return proofRetry === true ? defaults : { ...defaults, ...proofRetry };
+}
+
 function aborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted) throw keeperFailure("Settlement was aborted", "KEEPER_ABORTED", "Retry with a live AbortSignal when settlement should continue.", signal.reason);
 }
@@ -95,9 +113,7 @@ export class KeeperClient {
     }
     const finalRecord = await this.data.awaitFinal(options.fixtureId, options.signal ? { signal: options.signal } : {});
     options.market.assertSettlementRecord(finalRecord);
-    const retry: ProofRetryPolicy | undefined = options.proofRetry === false
-      ? undefined
-      : { timeoutMs: 180_000, ...(options.signal ? { signal: options.signal } : {}), ...options.proofRetry };
+    const retry = resolveProofRetry(options.proofRetry, options.signal);
     const proof = await this.proofs.fetch({
       fixtureId: options.fixtureId,
       seq: finalSeq(finalRecord),
