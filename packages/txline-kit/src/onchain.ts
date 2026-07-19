@@ -24,13 +24,33 @@ const DAY_MILLIS = 86_400_000;
  * timestamps, but every plausible seconds-unit timestamp falls under it. */
 const SECONDS_SUSPECT_BOUND = 100_000_000_000;
 
+/** Explicit unit override for a timestamp whose caller knows its unit for
+ * certain, bypassing the seconds-vs-milliseconds heuristic entirely. */
+export type TimestampUnit = "ms" | "s";
+
 /** Normalize a timestamp to milliseconds, healing seconds-unit inputs.
  * TxLINE responses mix seconds and milliseconds across endpoints; a seconds
  * value fed into a day calculation silently derives a wrong but valid-looking
- * PDA, so the ambiguity is resolved here in one place. */
-export function healTimestampMillis(timestamp: number | Date): number {
-  const value = timestamp instanceof Date ? timestamp.getTime() : timestamp;
+ * PDA, so the ambiguity is resolved here in one place.
+ *
+ * The heuristic bound only exists for genuinely ambiguous numeric input
+ * (e.g. a raw number pulled from an external API response). A `Date`
+ * instance is unambiguous by construction — `Date#getTime()` is always
+ * milliseconds — so it is used as-is without ever being reinterpreted as
+ * seconds, even if the value happens to fall under the suspect bound (a
+ * legitimate pre-1973 or synthetic/test timestamp). Callers that know their
+ * unit for other reasons (e.g. a raw number already confirmed to be seconds
+ * or milliseconds) can pass `unit` to bypass the heuristic the same way. */
+export function healTimestampMillis(timestamp: number | Date, unit?: TimestampUnit): number {
+  if (timestamp instanceof Date) {
+    const value = timestamp.getTime();
+    if (!Number.isSafeInteger(value) || value < 0) verificationFailure("Timestamp must be a non-negative integer in milliseconds or seconds", "PDA_TIMESTAMP_INVALID", "Pass an epoch timestamp such as bundle.summary.updateStats.minTimestamp.");
+    return value;
+  }
+  const value = timestamp;
   if (!Number.isSafeInteger(value) || value < 0) verificationFailure("Timestamp must be a non-negative integer in milliseconds or seconds", "PDA_TIMESTAMP_INVALID", "Pass an epoch timestamp such as bundle.summary.updateStats.minTimestamp.");
+  if (unit === "ms") return value;
+  if (unit === "s") return value * 1_000;
   return value > 0 && value < SECONDS_SUSPECT_BOUND ? value * 1_000 : value;
 }
 
@@ -40,20 +60,27 @@ function u16DaySeed(day: number): Uint8Array {
 }
 
 /** Derive a TxLINE root account for any namespace. Accepts milliseconds or
- * seconds (healed), and applies the ten-day bucketing rule for fixture roots. */
-export function deriveRootPda(input: { namespace: RootNamespace; timestamp: number | Date; programId: PublicKey }): PublicKey {
+ * seconds (healed), and applies the ten-day bucketing rule for fixture roots.
+ * A `Date` instance (or an explicit `timestampUnit`) is used exactly, never
+ * reinterpreted by the seconds-vs-milliseconds heuristic. */
+export function deriveRootPda(input: { namespace: RootNamespace; timestamp: number | Date; timestampUnit?: TimestampUnit; programId: PublicKey }): PublicKey {
   if (!ROOT_NAMESPACES.includes(input.namespace)) {
     verificationFailure(`Unknown root namespace ${String(input.namespace)}`, "PDA_NAMESPACE_INVALID", `Use one of: ${ROOT_NAMESPACES.join(", ")}.`);
   }
-  const day = Math.floor(healTimestampMillis(input.timestamp) / DAY_MILLIS);
+  const day = Math.floor(healTimestampMillis(input.timestamp, input.timestampUnit) / DAY_MILLIS);
   const bucket = input.namespace === "ten_daily_fixtures_roots" ? Math.floor(day / 10) * 10 : day;
   return PublicKey.findProgramAddressSync([encoder.encode(input.namespace), u16DaySeed(bucket)], input.programId)[0];
 }
 
+/** Derive the daily scores root PDA. A `Date` instance is unambiguous
+ * milliseconds by construction, so it always bypasses the seconds-suspect
+ * check below — only a raw `number` (which could plausibly have arrived as
+ * seconds from an external API) is checked against the heuristic bound. */
 export function dailyScoresPda(timestamp: number | Date, programId: PublicKey): PublicKey {
-  const millis = timestamp instanceof Date ? timestamp.getTime() : timestamp;
+  const isDate = timestamp instanceof Date;
+  const millis = isDate ? timestamp.getTime() : timestamp;
   if (!Number.isSafeInteger(millis) || millis < 0) verificationFailure("Daily score PDA timestamp must be a non-negative integer in milliseconds", "PDA_TIMESTAMP_INVALID", "Use bundle.summary.updateStats.minTimestamp without converting it to seconds.");
-  if (millis > 0 && millis < SECONDS_SUSPECT_BOUND) {
+  if (!isDate && millis > 0 && millis < SECONDS_SUSPECT_BOUND) {
     verificationFailure(`Timestamp ${millis} appears to be in seconds; a wrong PDA would be derived`, "PDA_TIMESTAMP_UNIT_SUSPECT", "Pass milliseconds (bundle.summary.updateStats.minTimestamp is already milliseconds), or use deriveRootPda, which heals seconds inputs.");
   }
   const epochDay = Math.floor(millis / DAY_MILLIS);
